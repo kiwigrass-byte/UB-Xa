@@ -16,12 +16,8 @@ local lowerChannel = lowerDevice:getChannel()
 local lowerPort      = lowerDevice:getPort ()
 
 local authorDate ="New Ignis 2024"
-info.setText(authorDate)
 local patchName = authorDate  -- initialize patch name displayed in RH corner 
-timer.setPeriod(500) -- Set timer tick rate (e.g., every 100 milliseconds)
 local amountTicks = 0  -- Tracks how many ticks have passed
-
-events.subscribe(POTS) -- for pot touch help
 
 local nrpn_state = {}
 local nrpn_callback = nil
@@ -34,26 +30,29 @@ for y = 1,4 do -- 1 == bank A, 1= bank B, 3 = bank C, 4 = bank D
     for z = 0,127 do nameBank[y][z] = defaultVal[1] end -- patch numbers
 end
 
--- initailize panning
-local panDefValue = {}
+local panDefValue = {} -- initailize panning
 for i = 1,16 do panDefValue[i] = 128 end -- all in center
+
+info.setText(authorDate)
+timer.setPeriod(500) -- Set timer tick rate (e.g., every 100 milliseconds)
+events.subscribe(POTS) -- for pot touch help
+
+-- load the UB-Xa global settings when the preset is first loaded
+function preset.onLoad()
+  getGlobals(nil,1)
+end
+-- load the UB-Xa patch names from all 4 banks when the preset is first is first loaded AND read to give more time
+function preset.onReady()
+  getPatchNames(nil,1)
+end
 
 function setChannel(valueObject, value) 
   -- if value ==0 then value = 3 end -- default behind the screens on Global Channel
   local selectedDevice= devices.get(value+2)
   currentChannel = selectedDevice:getChannel ()
   devices.get(1):setChannel (currentChannel )
+  devices.get(1):setPort (currentPort )
 end
-
--- load the UB-Xa global settings when the preset is first loaded
-function preset.onLoad()
-  getGlobals(nil,1)
-end
-
--- load the UB-Xa patch names from all 4 banks when the preset is first is first loaded AND read to give more time
---function preset.onReady()
---  getPatchNames(nil,1)
---end
 
 function seqStartStop(valueObject, value)
   if value == 1 then midi.sendStart(currentPort)
@@ -66,20 +65,21 @@ function displayChar (valueObject, value)
   return string.char(value)
 end
 
+---- value formater functions ----
 -- format Pan
 function fmtPan(valueObject,value)
-local control = valueObject:getControl():getId()
- local side =" L"
- if (value < 0 ) then 
+  local control = valueObject:getControl():getId()
+  local side =" L"
+  if (value < 0 ) then 
     controls.get(control):setColor (WHITE)
- elseif (value == 0) then
+  elseif (value == 0) then
     side = " Center"
     controls.get(control):setColor (26 *256*256 + 200*256 + 30)
- elseif (value > 0) then
+  elseif (value > 0) then
     side = " R"
     controls.get(control):setColor (RED)
- end
- return(string.format ("%.0f%%",100*(math.abs(math.floor(value)))/128) .. side)
+  end
+  return(string.format ("%.0f%%",100*(math.abs(math.floor(value)))/128) .. side)
 end
 
 -- Add % sign
@@ -129,7 +129,6 @@ end
 function semitones (valueObject, value)
     return (string.format ("%d semitones", value))
 end
-
 -- atrophy parameter formats from sysex guide
 function trackOffset (valueObject, value)
     return (string.format ("%d semitones", -value))
@@ -284,13 +283,6 @@ function setPanDefault(valueObject, value)
   panDefValue[parameterNumber+1-2176] = value+128
 end
 
-function parameterMap.onChange(valueObjects, origin, midiValue)
-  if origin ~= INTERNAL then return end
-  local ctlId = valueObjects[1]:getControl():getId()
-  local pNum = valueObjects[1]:getMessage():getParameterNumber()
-  local pValue = valueObjects[1]:getMessage():getValue()
-end
-
 -- bitmask helper function ---
 function sendBitmask(paramNumber, deviceId, paramList)
   local value = 0
@@ -314,7 +306,6 @@ function bitMask007(valueObject,value) -- NRPN 0/7 = 7 ControlPortamentoSettings
 -- Bitmask: Match (0001) Quantize (0010) Bend (0100) Exponential (1000)
   sendBitmask(7, deviceId, {54,60,59,65})
 end
-
 function bitMask101(valueObject,value) -- NRPN 1/1 = 129 PerformanceSettings 
 -- Bitmask: Bend Osc2 only~Bend Osc1&Osc2 (000001) Custombend~Bend +/-2 (000010) OSC1 (000100) OSC2 (001000) Upper (010000) Lower (100000)
   sendBitmask(129, deviceId, {8,10,19,97,103,109}) 
@@ -325,7 +316,6 @@ function bitMask101(valueObject,value) -- NRPN 1/1 = 129 PerformanceSettings
     controls.get (110):setVisible (true)
   end
 end
-
 function bitMask107(valueObject,value) -- NRPN 1/7 = 135 PerformanceLFOMods 
 -- Bitmask: Track (0001) Envelope (0010) TempoLock (0100) LFOTrig (1000)
   sendBitmask(135, deviceId, {117,118,119}) 
@@ -372,7 +362,7 @@ function bitMask504(valueObject,value) -- NRPN 5/4 = 644 FilterModes
 end
 
 -- helper function to extract ascii bytes from a number
-function asciiBytesFromNumber(n, width)
+local function asciiBytesFromNumber(n, width)
   local s = string.format("%0"..tostring(width).."d", n)
   local bytes = {}
   for i=1,#s do bytes[#bytes+1] = string.byte(s,i) end
@@ -511,7 +501,7 @@ end
 ------------------------------------------------------------------------
 -- This is lua equivalent of the php script by @Electrolove to extract the patch name from a UB-Xa patch sysEx dump
 -- Helper: safe getter that treats PHP-style 0-based indices: pass php_index (0-based)
-function get(msg, idx0)
+local function get(msg, idx0)
   -- msg is a Lua array indexed from 1..n; PHP index k => Lua index (k+1)
   return msg[idx0 + 1]
 end
@@ -611,7 +601,7 @@ function parse_sysex(messages)
 end
 
 -- helper function for get_patch_name
-function trim(s) return s:match("^%s*(.-)%s*$") end
+local function trim(s) return s:match("^%s*(.-)%s*$") end
 
 function get_patch_name(data,startIdx)
   if type(data) ~= "table" then return "" end
@@ -655,21 +645,6 @@ function pset(params, value)
   end
 end
 
--- Adds midi.onNrpn(callback) by listening to midi.onControlChange
--- Callback signature: callback(channel, nrpnParam, value, info)
--- nrpnParam = 0..16383 (msb*128 + lsb)
--- value = combined 14-bit value if LSB available, otherwise 7-bit MSB value (or amount for inc/dec)
--- info.type = "data_entry_msb" | "data_entry_lsb" | "inc" | "dec"
--- info.msb / info.lsb included when applicable
--- electra_nrpn.lua
--- NRPN helper for Electra One Lua API (simplified: no RPN protection)
--- Adds midi.onNrpn(callback) by listening to midi.onControlChange
--- Callback signature: callback(channel, nrpnParam, value, info)
--- nrpnParam = 0..16383 (msb*128 + lsb)
--- value = combined 14-bit value if LSB available, otherwise 7-bit MSB value (or amount for inc/dec)
--- info.type = "data_entry_msb" | "data_entry_lsb" | "inc" | "dec"
--- info.msb / info.lsb included when applicable
-
 -- helper functions and globals for midi.onSysex 
 local sysex_states = {}
 local VENDOR_ID = {0x00, 0x20, 0x32} -- Behringer
@@ -701,12 +676,12 @@ local HANDLERS = {
   currentProgram = { endMsgNum = 16, handlerName = "currentProgram" },
 }
 
-function safe_peek(sysexBlock, length, i)
+local function safe_peek(sysexBlock, length, i)
   if type(i) ~= "number" or i < 1 or i > length then return nil end
   return sysexBlock:peek(i)
 end
 
-function peek_string(sysexBlock, length, startIndex, count)
+local function peek_string(sysexBlock, length, startIndex, count)
   if startIndex < 1 or count < 1 then return "" end
   local t = {}
   for j = 0, count - 1 do
@@ -717,13 +692,13 @@ function peek_string(sysexBlock, length, startIndex, count)
   return table.concat(t)
 end
 
-function is_vendor_match(sysexBlock, length)
+local function is_vendor_match(sysexBlock, length)
   return safe_peek(sysexBlock, length, 2) == VENDOR_ID[1]
      and safe_peek(sysexBlock, length, 3) == VENDOR_ID[2]
      and safe_peek(sysexBlock, length, 4) == VENDOR_ID[3]
 end
 
-function detect_dump_type(sysexBlock, length)
+local function detect_dump_type(sysexBlock, length)
   local hdrText = peek_string(sysexBlock, length, 21, 16):lower()
   
   if hdrText:find("upper patch", 1, true) then
@@ -746,7 +721,7 @@ function detect_dump_type(sysexBlock, length)
   return nil
 end
 
-function reset_state_for_iface(iface)
+local function reset_state_for_iface(iface)
   sysex_states[iface] = {
     msgNumber = 0,
     section = 0,
@@ -756,7 +731,7 @@ function reset_state_for_iface(iface)
   }
 end
 
-function call_handler(dumpType, dump)
+local function call_handler(dumpType, dump)
   local handlerInfo = HANDLERS[dumpType]
   if not handlerInfo then return end
   local fn = _G[handlerInfo.handlerName]
@@ -767,7 +742,7 @@ function call_handler(dumpType, dump)
   end
 end
 
-function log_sysex(msgNumber, iface, length, sysexBlock)
+local function log_sysex(msgNumber, iface, length, sysexBlock)
   print(string.format("sysex (msg=%d) message received: interface=%s length=%d",
     msgNumber, iface, length))
   for startIndex = 1, length, 24 do
@@ -781,7 +756,7 @@ function log_sysex(msgNumber, iface, length, sysexBlock)
   end
 end
 
-function collect_dump(sysexBlock, length)
+local function collect_dump(sysexBlock, length)
   local temp = {}
   for i = 1, length do
     local b = sysexBlock:peek(i)
@@ -1323,12 +1298,8 @@ end
 -- info.type = "data_entry_msb" | "data_entry_lsb" | "inc" | "dec"
 -- info.msb / info.lsb included when applicable
 
-local nrpn_state = {}
-local nrpn_callback = nil
-local registered = false
-
 -- core processor expects (channel, controller, value)
-local function process_cc(channel, controller, value)
+function process_cc(channel, controller, value)
   if not channel then return end
   local s = nrpn_state[channel] or { nrpn_msb = nil, nrpn_lsb = nil, data_msb = nil, data_lsb = nil }
   -- NRPN parameter select
