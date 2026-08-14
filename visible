@@ -1,0 +1,13 @@
+  if parameterNumber == 10028 then
+    local isVisible = (midiValue ~= 0)
+    if midiValue == 0 then  -- single 
+      for _,id in ipairs({166,174,216,317,321,58,231}) do  -- control select controls
+        local c = safeGet(id); if c then c:setVisible(isVisible) end  -- make controls not visible
+      end
+    end
+  end
+
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
