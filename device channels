@@ -1,0 +1,21 @@
+local currentDevice  = devices.get(1)
+local deviceId = currentDevice:getId()
+local currentChannel = currentDevice:getChannel ()
+local currentPort      = currentDevice:getPort ()
+local upperDevice  = devices.get(2)
+local upperChannel = upperDevice:getChannel ()
+local lowerDevice  = devices.get(3)
+local lowerChannel = lowerDevice:getChannel()
+
+print("current channel: "..currentChannel)
+print("upper channel: "..upperChannel)
+print("lower channel: "..lowerChannel)
+
+function assignChannel(valueObject, value)
+  if value == 1 then -- upper
+    currentDevice:setChannel(upperChannel)
+  elseif value == 2 then  -- lower
+    currentDevice:setChannel(lowerChannel)
+  end
+  print("current channel: "..currentChannel)
+end
