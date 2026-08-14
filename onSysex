@@ -1,0 +1,194 @@
+-- helper functions and globals for midi.onSysex 
+local sysex_states = {}
+local VENDOR_ID = {0x00, 0x20, 0x32} -- Behringer
+local HEADER_MSG_TYPE = 1
+local PACKET_MSG_TYPE = 2
+local EOF_SYSEX_FOURTH_BYTE = 0x7B -- ACK byte of EOF message
+
+-- Dump type constants
+local DUMP_TYPES = {
+  UPPER_PATCH = "upperPatch",
+  LOWER_PATCH = "lowerPatch",
+  PATCHX = "patchX",
+  PATCH_NAMES = "patchNames",
+  GLOBAL = "global",
+  ATROPHY = "atrophy",
+  SPLIT_DOUBLE = "splitDouble",
+  CURRENT_PROGRAM = "currentProgram",
+}
+
+-- Handler mapping: dumpType -> {endMsgNum, handlerName}
+local HANDLERS = {
+  upperPatch = { endMsgNum = 9, handlerName = "upperPatch" },
+  lowerPatch = { endMsgNum = 9, handlerName = "lowerPatch" },
+  patchX = { endMsgNum = 9, handlerName = "patchX" },
+  patchNames = { endMsgNum = 76, handlerName = "patchNames" },
+  global = { endMsgNum = 3, handlerName = "global" },
+  atrophy = { endMsgNum = 3, handlerName = "atrophy" },
+  splitDouble = { endMsgNum = 14, handlerName = "splitDouble" },
+  currentProgram = { endMsgNum = 16, handlerName = "currentProgram" },
+}
+
+local function safe_peek(sysexBlock, length, i)
+  if type(i) ~= "number" or i < 1 or i > length then return nil end
+  return sysexBlock:peek(i)
+end
+
+local function peek_string(sysexBlock, length, startIndex, count)
+  if startIndex < 1 or count < 1 then return "" end
+  local t = {}
+  for j = 0, count - 1 do
+    local b = safe_peek(sysexBlock, length, startIndex + j)
+    if not b then break end
+    t[#t+1] = string.char(b)
+  end
+  return table.concat(t)
+end
+
+local function is_vendor_match(sysexBlock, length)
+  return safe_peek(sysexBlock, length, 2) == VENDOR_ID[1]
+     and safe_peek(sysexBlock, length, 3) == VENDOR_ID[2]
+     and safe_peek(sysexBlock, length, 4) == VENDOR_ID[3]
+end
+
+local function detect_dump_type(sysexBlock, length)
+  local hdrText = peek_string(sysexBlock, length, 21, 16):lower()
+  
+  if hdrText:find("upper patch", 1, true) then
+    return DUMP_TYPES.UPPER_PATCH
+  elseif hdrText:find("lower patch", 1, true) then
+    return DUMP_TYPES.LOWER_PATCH
+  elseif hdrText:find("patchx", 1, true) then
+    return DUMP_TYPES.PATCH_X
+  elseif hdrText:find("patch names", 1, true) then
+    return DUMP_TYPES.PATCH_NAMES
+  elseif hdrText:find("global", 1, true) then
+    return DUMP_TYPES.GLOBAL
+  elseif hdrText:find("atrophy", 1, true) then
+    return DUMP_TYPES.ATROPHY
+  elseif hdrText:find("split double", 1, true) then
+    return DUMP_TYPES.SPLIT_DOUBLE
+  elseif hdrText:find("current program", 1, true) then
+    return DUMP_TYPES.CURRENT_PROGRAM
+  end
+  return nil
+end
+
+local function reset_state_for_iface(iface)
+  sysex_states[iface] = {
+    msgNumber = 0,
+    section = 0,
+    dump = {},
+    dumpType = nil,
+    last_ts = nil
+  }
+end
+
+local function call_handler(dumpType, dump)
+  local handlerInfo = HANDLERS[dumpType]
+  if not handlerInfo then return end
+  local fn = _G[handlerInfo.handlerName]
+  if type(fn) == "function" then
+    pcall(fn, dump)
+  else
+    print("onSysex: " .. handlerInfo.handlerName .. "() not available")
+  end
+end
+
+local function log_sysex(msgNumber, iface, length, sysexBlock)
+  print(string.format("sysex (msg=%d) message received: interface=%s length=%d",
+    msgNumber, iface, length))
+  for startIndex = 1, length, 24 do
+    local bytes = {}
+    local endIndex = math.min(startIndex + 23, length)
+    for i = startIndex, endIndex do
+      local b = sysexBlock:peek(i) or 0
+      bytes[#bytes + 1] = string.format("%02X", b)
+    end
+    print(string.format("data[%04X]: %s", startIndex - 1, table.concat(bytes, " ")))
+  end
+end
+
+local function collect_dump(sysexBlock, length)
+  local temp = {}
+  for i = 1, length do
+    local b = sysexBlock:peek(i)
+    if not b then break end
+    temp[i] = b
+  end
+  return temp
+end
+
+function midi.onSysex(midiInput, sysexBlock)
+  local ok, err = pcall(function()
+    local length = sysexBlock:getLength()
+    local iface = tostring(midiInput.interface or midiInput.name or "unknown")
+    local state = sysex_states[iface]
+    if not state then
+      reset_state_for_iface(iface)
+      state = sysex_states[iface]
+    end
+    -- Reset state if starting a new transfer
+    if state.msgNumber == 0 then
+      state.dump = {}
+      state.section = 0
+      state.dumpType = nil
+    end
+    -- HEADER detection
+    if length > 6 and safe_peek(sysexBlock, length, 11) == HEADER_MSG_TYPE then
+      local expected_header_msgnum = 1 + (state.section or 0) * 2
+      if state.msgNumber ~= 0 and state.msgNumber ~= expected_header_msgnum then
+        print("onSysex: unexpected header while msgNumber=" .. tostring(state.msgNumber) .. "; resetting state and starting new transfer")
+        reset_state_for_iface(iface)
+        state = sysex_states[iface]
+      end
+      if state.msgNumber == 0 then
+        -- Start of first header: validate vendor and model
+        state.section = 0
+        state.msgNumber = 1
+        if not is_vendor_match(sysexBlock, length) then
+          print("onSysex: Not Behringer vendor; ignoring message")
+          reset_state_for_iface(iface)
+          return
+        end
+        if safe_peek(sysexBlock, length, 7) ~= MODEL_BYTE then
+          print("onSysex: Not UB-Xa model; ignoring message")
+          reset_state_for_iface(iface)
+          return
+        end
+        -- Detect dump type from header text (only on first header)
+        state.dumpType = detect_dump_type(sysexBlock, length)
+      else
+        -- Additional header: advance section
+        state.section = (state.section or 0) + 1
+        state.msgNumber = 1 + state.section * 2
+        -- dumpType already set by first header, do not reset
+      end
+    end
+    -- PACKET detection: simplified to single peek
+    if length > 6 and safe_peek(sysexBlock, length, 11) == PACKET_MSG_TYPE then
+      local packetNum = safe_peek(sysexBlock, length, 12)
+      if packetNum and packetNum >= 0 and packetNum <= 76 then
+        state.msgNumber = packetNum + 2 + (state.section or 0) * 2
+      end
+    end
+    -- Logging (optional)
+--    log_sysex(state.msgNumber, iface, length, sysexBlock)
+    -- Collect message into dump
+    table.insert(state.dump, collect_dump(sysexBlock, length))
+    -- Call handler on EOF if applicable
+    if state.dumpType then
+      local handlerInfo = HANDLERS[state.dumpType]
+      if handlerInfo and state.msgNumber == handlerInfo.endMsgNum then
+        call_handler(state.dumpType, state.dump)
+        reset_state_for_iface(iface)
+        return
+      end
+    end
+    -- Advance message number for next call
+    state.msgNumber = state.msgNumber + 1
+  end)
+  if not ok then
+    print("onSysex: pcall failed: " .. tostring(err))
+  end
+end
