@@ -1,41 +1,47 @@
   local mode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
-  local v = {}
+  local v = 0
   if mode == 0 then return end -- single
   if mode == 2 then  -- split
     v = value + 1
   elseif mode == 1 then -- double
     v = value + 37
   end
+
   local UP = math.floor(sdMatrix[v][1] + 1)
   local UB = math.floor(sdMatrix[v][2] + 1)
   local LP = math.floor(sdMatrix[v][3] + 1)
   local LB = math.floor(sdMatrix[v][4] + 1)
   -- display loaded upper and lower split and double patch names
-  local bank={"A","B","C","D"} -- abbreviations of the bank names
+  local bank = {"A","B","C","D"} -- abbreviations of the bank names
 
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, 10029) 
-  if part == 0 then 
-    local bankNumU = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
-    local patchNumU = math.floor(parameterMap.get (deviceId, PT_VIRTUAL, 6033)+1)
-    local bankNumL = bankNumU
-    local patchNumL = patchNumU
+  -- declare these in outer scope so they're available later
+  local bankNumU, patchNumU, bankNumL, patchNumL
+
+  local part = parameterMap.get(deviceId, PT_VIRTUAL, 10029)
+  if part == 0 then
+    bankNumU = parameterMap.get(deviceId, PT_VIRTUAL, 6032) + 1
+    patchNumU = math.floor(parameterMap.get(deviceId, PT_VIRTUAL, 6033) + 1)
+    bankNumL = bankNumU
+    patchNumL = patchNumU
   elseif part == 1 then
-    local bankNumL = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
-    local patchNumL = math.floor(parameterMap.get (deviceId, PT_VIRTUAL, 6033)+1)
+    bankNumL = parameterMap.get(deviceId, PT_VIRTUAL, 6032) + 1
+    patchNumL = math.floor(parameterMap.get(deviceId, PT_VIRTUAL, 6033) + 1)
   end
 
-  if (v == 1 or v == 37) then 
+  if (v == 1 or v == 37) then
+    -- use the previously assigned values (they now exist)
     UP = patchNumU
     UB = bankNumU
     LP = patchNumL
     LB = bankNumL
-    print(v.. " ".. UP .. " " .. LP)
+    print(v .. " " .. tostring(UP) .. " " .. tostring(LP))
   end
 
   if nameBank and nameBank[UB] and nameBank[UB][UP] then
-    if v >= 1 and v < 37  then 
-      controls.get(166):setName(bank[UB]..""..UP.." "..nameBank[UB][UP])
-    elseif v >= 37  then 
-      controls.get(216):setName(bank[UB]..""..UP.." "..nameBank[UB][UP])
+    local displayName = bank[UB] .. tostring(UP) .. " " .. (nameBank[UB][UP] or "")
+    if v >= 1 and v < 37 then
+      controls.get(166):setName(displayName)
+    elseif v >= 37 then
+      controls.get(216):setName(displayName)
     end
   end
