@@ -14,7 +14,7 @@
   -- display loaded upper and lower split and double patch names
   local bank = {"A","B","C","D"} -- abbreviations of the bank names
 
-  -- declare these in outer scope so they're available later
+  -- declare these so they exist in this scope
   local bankNumU, patchNumU, bankNumL, patchNumL
 
   local part = parameterMap.get(deviceId, PT_VIRTUAL, 10029)
@@ -23,17 +23,27 @@
     patchNumU = math.floor(parameterMap.get(deviceId, PT_VIRTUAL, 6033) + 1)
     bankNumL = bankNumU
     patchNumL = patchNumU
+
   elseif part == 1 then
+    -- always read current lower settings
     bankNumL = parameterMap.get(deviceId, PT_VIRTUAL, 6032) + 1
     patchNumL = math.floor(parameterMap.get(deviceId, PT_VIRTUAL, 6033) + 1)
+
+    -- infer upper from the sdMatrix-derived UP/UB if no explicit upper was set in this call
+    if not bankNumU then bankNumU = UB end
+    if not patchNumU then patchNumU = UP end
+  else
+    -- fallback for unexpected part values: derive both from sdMatrix
+    bankNumU, patchNumU = UB, UP
+    bankNumL, patchNumL = LB, LP
   end
 
   if (v == 1 or v == 37) then
-    -- use the previously assigned values (they now exist)
-    UP = patchNumU
-    UB = bankNumU
-    LP = patchNumL
-    LB = bankNumL
+    -- prefer explicit/read values; fall back to sdMatrix-derived ones
+    UP = patchNumU or UP
+    UB = bankNumU or UB
+    LP = patchNumL or LP
+    LB = bankNumL or LB
     print(v .. " " .. tostring(UP) .. " " .. tostring(LP))
   end
 
@@ -43,5 +53,12 @@
       controls.get(166):setName(displayName)
     elseif v >= 37 then
       controls.get(216):setName(displayName)
+    end
+  end
+  if nameBank and nameBank[LB] and nameBank[LB][LP] then
+    if v >= 1 and v < 37  then 
+      controls.get(174):setName(bank[LB]..""..LP.." "..nameBank[LB][LP])
+    elseif v >= 37  then
+      controls.get(226):setName(bank[LB]..""..LP.." "..nameBank[LB][LP])
     end
   end
