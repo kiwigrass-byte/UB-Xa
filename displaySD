@@ -4,8 +4,8 @@ function selectIt(valueObject, value)
   local message = valueObject:getMessage ()
   local parameterNumber = message:getParameterNumber ()
   local messageValue = message:getValue ()
-  local bankLSB = parameterMap.get (1, PT_VIRTUAL, parameterNumber-messageValue -1)
-  local progNum = parameterMap.get (1, PT_VIRTUAL, parameterNumber-messageValue ) + messageValue - 2
+  local bankLSB = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue -1)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue ) + messageValue - 2
   if progNum == 128 then progNum= 0 end
   if progNum == -1   then progNum=127  end
   parameterMap.set (deviceId, PT_VIRTUAL, parameterNumber-messageValue,progNum)
@@ -26,11 +26,9 @@ function selectIt(valueObject, value)
     sdMatrix[37][3] = progNum
     sdMatrix[37][4] = bankLSB
   end
-  if mode == 1 then 
-    parameterMap.set (deviceId, PT_VIRTUAL, 10030,36)
-  elseif mode == 2 then
-    parameterMap.set (deviceId, PT_VIRTUAL, 10023,0)
-  end
+  -- Force a UI refresh for the updated slots:
+  displaySD(nil, 0)   -- redraw slot 1 (sdMatrix[1])
+  displaySD(nil, 36)  -- redraw slot 37 (sdMatrix[37])
 end
 
 function displaySD (valueObject, value)
