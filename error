@@ -1,4 +1,5 @@
-  local mode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
+function displaySD (valueObject, value)
+local mode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
   local v = 0
   if mode == 0 then return end -- single
   if mode == 2 then  -- split
@@ -29,9 +30,8 @@
     bankNumL = parameterMap.get(deviceId, PT_VIRTUAL, 6032) + 1
     patchNumL = math.floor(parameterMap.get(deviceId, PT_VIRTUAL, 6033) + 1)
 
-    -- infer upper from the sdMatrix-derived UP/UB if no explicit upper was set in this call
-    if not bankNumU then bankNumU = UB end
-    if not patchNumU then patchNumU = UP end
+    -- DO NOT infer upper from UB/UP here — leave bankNumU/patchNumU nil unless part==0 set them.
+    -- This ensures UP/UB (sdMatrix-derived or previously computed in this call) are preserved.
   else
     -- fallback for unexpected part values: derive both from sdMatrix
     bankNumU, patchNumU = UB, UP
@@ -62,3 +62,4 @@
       controls.get(226):setName(bank[LB]..""..LP.." "..nameBank[LB][LP])
     end
   end
+end
