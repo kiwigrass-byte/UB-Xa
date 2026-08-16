@@ -38,56 +38,6 @@ function assignChannel(valueObject, value)
   print("current channel now: "..tostring(currentChannel))
 end
 
--- quant mode from parameter 535: 0=+Oct,1=+Semi,2=+Free,3=±Oct,4=±Semi,5=±Free
--- quantized frequency callback (short name)
-local function roundNearest(n, step)
-  if step == 0 then return n end
-  if n >= 0 then
-    return math.floor((n + step/2) / step) * step
-  else
-    return math.ceil((n - step/2) / step) * step
-  end
-end
-
-local QUANT_MODES = {
-  [0] = { step = 768, symmetric = false }, -- +Octaves
-  [1] = { step = 64,  symmetric = false }, -- +Semitones
-  [2] = { free  = true },                  -- +Free
-  [3] = { step = 768, symmetric = true  }, -- +/- Octaves
-  [4] = { step = 64,  symmetric = true  }, -- +/- Semitones
-  [5] = { free  = true },                  -- +/- Free
-}
-
-local function freqQcb(valueObject, value)
-  local raw = tonumber(value) or 0               -- 0..16383
-  local signed = raw - 8192                      -- -8192..8191
-
-  local qmode = parameterMap.get(deviceId, PT_VIRTUAL, 535)
-  local mode = QUANT_MODES[qmode]
-
-  if not mode or mode.free then
-    parameterMap.set(deviceId, PT_NRPN, 513, raw) -- PT_NRPN for param 513
-    valueObject:setValue(raw)
-    return
-  end
-
-  local step = mode.step or 1
-  local qSigned = roundNearest(signed, step)
-
-  -- clamp negative values to 0 for positive-only modes
-  if not mode.symmetric and qSigned < 0 then qSigned = 0 end
-
-  if qSigned > 8191 then qSigned = 8191 end
-  if qSigned < -8192 then qSigned = -8192 end
-
-  local qRaw = qSigned + 8192
-
-  parameterMap.set(deviceId, PT_NRPN, 513, qRaw) -- write as NRPN
-  valueObject:setValue(qRaw)
-end
-
-controls.get(17):setPotCallback(freqQcb)
-
 local authorDate ="New Ignis 2024"
 local patchName = authorDate  -- initialize patch name displayed in RH corner 
 local amountTicks = 0  -- Tracks how many ticks have passed
@@ -148,6 +98,174 @@ end
 -- display functions -----------------------------------------------------------------------------------------------------------
 function displayChar (valueObject, value)
   return string.char(value)
+end
+
+-- Multi-osc quantizer, mode labels and value formatters for UB-Xa preset
+-- Supports:
+--  - freqQ1 : oscillator 1 editor Function (NRPN 513, quant param 535, control id 17)
+--  - freqQ2 : oscillator 2 editor Function (NRPN 515, quant param 536, control id 95)
+--  - formatFreq1 / formatFreq2 as Value formatter functions to show human-friendly text
+--
+-- Behavior:
+--  - Signed display domain: -8192 .. +8191 (but also accepts 0..16383 unsigned and converts)
+--  - Semitone interaction for octave modes (fine control), snaps final NRPN to exact octaves
+--  - Labels control name to concise mode (e.g. "Transpose +Octaves"), value formatter shows semitones/octaves
+--  - Writes exact 14-bit NRPN values to the synth (no approximation)
+
+local STEP_SEMITONE = 64
+local STEP_OCTAVE  = 12 * STEP_SEMITONE -- 768
+local CENTER_RAW   = 8192
+local RAW_MIN, RAW_MAX = 0, 16383
+local SIGN_MIN, SIGN_MAX = -8192, 8191
+
+-- tweak sensitivity if needed (<1 = more sensitive, >1 = less)
+local SENSITIVITY = 1.0
+
+local QUANT_MODES = {
+  -- octave modes use semitone stepping for interaction but show octaves
+  [0] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = true }, -- +Octaves
+  [1] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = false },-- +Semitones
+  [2] = { quant = false,                 symmetric = false, octave_display = false },     -- +Free
+  [3] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = true }, -- +/- Octaves
+  [4] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = false },-- +/- Semitones
+  [5] = { quant = false,                 symmetric = true,  octave_display = false },     -- +/- Free
+}
+
+local function clamp(x, lo, hi) if x < lo then return lo end if x > hi then return hi end return x end
+
+local function roundNearestSteps(signed, step)
+  if step == 0 then return 0 end
+  local eff = signed / SENSITIVITY
+  if eff >= 0 then
+    return math.floor((eff + step/2) / step)
+  else
+    return math.ceil((eff - step/2) / step)
+  end
+end
+
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
+
+-- Read quant mode for a given quantParam (try NRPN then VIRTUAL)
+local function readQuantModeFor(quantParam)
+  local q = parameterMap.get(deviceId, PT_NRPN, quantParam)
+  if q == nil then q = parameterMap.get(deviceId, PT_VIRTUAL, quantParam) end
+  return tonumber(q)
+end
+-- Quantize given signed display value (signed_in in -8192..+8191) for given quantParam.
+-- Returns quantized raw14 value (0..16383), integer n (step multiplier), and mode table.
+local function quantizeSignedFor(signed_in, quantParam)
+  local signed = clamp(tonumber(signed_in) or 0, SIGN_MIN, SIGN_MAX)
+  local qmode = readQuantModeFor(quantParam)
+  local mode = QUANT_MODES[qmode] or QUANT_MODES[2]
+
+  if not mode.quant then
+    if not mode.symmetric and signed < 0 then signed = 0 end
+    local qRaw = clamp(signed + CENTER_RAW, RAW_MIN, RAW_MAX)
+    return qRaw, 0, mode
+  end
+
+  local step = mode.step or STEP_SEMITONE
+  local n = roundNearestSteps(signed, step)
+  if not mode.symmetric and n < 0 then n = 0 end
+
+  local maxN = math.floor(SIGN_MAX / step)
+  local minN = math.ceil(SIGN_MIN / step)
+  if not mode.symmetric then minN = 0 end
+  if n > maxN then n = maxN end
+  if n < minN then n = minN end
+
+  local qSigned = n * step
+  -- If octave_display requested, snap qSigned to exact octaves (multiples of 12 semitones)
+  if mode.octave_display then
+    local semitones = qSigned / STEP_SEMITONE
+    local octN = math.floor(semitones / 12 + (semitones >= 0 and 0.5 or -0.5))
+    qSigned = octN * 12 * STEP_SEMITONE
+    -- update n relative to step (step is semitone), clamp again
+    n = math.floor(qSigned / step + 0.5)
+    if not mode.symmetric and n < 0 then n = 0 end
+  end
+  local qRaw = clamp(qSigned + CENTER_RAW, RAW_MIN, RAW_MAX)
+  return qRaw, n, mode
+end
+
+-- Helper to apply quant result to UI and NRPN (ctrlId = editor control id)
+-- Sets control name to short mode label (e.g. "Transpose +Octaves")
+local function applyQuantResult(qRaw, n, mode, ctrlId, valueObject, quantParam)
+  -- update display with signed value
+  local signed_out = qRaw - CENTER_RAW
+  local ctrl = valueObject
+  if not ctrl then ctrl = safeGet(ctrlId) end
+  if ctrl and type(ctrl.setValue) == "function" then
+    pcall(function() ctrl:setValue(signed_out) end)
+  end
+end
+
+-- robust incoming value normalization: accepts signed (-8192..8191) or unsigned (0..16383)
+local function normalizeIncomingToSigned(incoming)
+  incoming = tonumber(incoming) or 0
+  if incoming >= 0 and incoming <= RAW_MAX then
+    if incoming > SIGN_MAX then
+      return incoming - CENTER_RAW -- unsigned -> signed
+    else
+      return incoming -- already signed
+    end
+  end
+  return clamp(incoming, SIGN_MIN, SIGN_MAX)
+end
+
+-- Osc 1: NRPN param 513, quant param 535, control id 17 -> function name freqQ1
+function freqQ1(valueObject, value)
+  local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
+  local incoming = normalizeIncomingToSigned(raw_in)
+  local qRaw, n, mode = quantizeSignedFor(incoming, 535)
+  parameterMap.set(deviceId, PT_NRPN, 513, qRaw)
+  applyQuantResult(qRaw, n, mode, 17, valueObject, 535)
+end
+
+-- Osc 2: NRPN param 515, quant param 536, control id 95 -> function name freqQ2
+function freqQ2(valueObject, value)
+  local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
+  local incoming = normalizeIncomingToSigned(raw_in)
+  local qRaw, n, mode = quantizeSignedFor(incoming, 536)
+  parameterMap.set(deviceId, PT_NRPN, 515, qRaw)
+  applyQuantResult(qRaw, n, mode, 95, valueObject, 536)
+end
+
+-- Value formatter for oscillator 1 
+function formatFreq1(valueObject, value)
+  local signed = normalizeIncomingToSigned(value)
+  local qRaw, n, mode = quantizeSignedFor(signed, 535)
+  if mode and mode.quant then
+    local semitones = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
+    local showOct = mode.octave_display or (semitones % 12 == 0)
+    if showOct then
+      local oct = semitones / 12
+      return string.format("%+d oct (%+d st)", oct, semitones)
+    else
+      return string.format("%+d st", semitones)
+    end
+  end
+  return tostring(signed)
+end
+
+-- Value formatter for oscillator 2 
+function formatFreq2(valueObject, value)
+  local signed = normalizeIncomingToSigned(value)
+  local qRaw, n, mode = quantizeSignedFor(signed, 536)
+  if mode and mode.quant then
+    local semitones = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
+    local showOct = mode.octave_display or (semitones % 12 == 0)
+    if showOct then
+      local oct = semitones / 12
+      return string.format("%+d oct (%+d st)", oct, semitones)
+    else
+      return string.format("%+d st", semitones)
+    end
+  end
+  return tostring(signed)
 end
 
 function showMidiTempo(valueObject,value)
@@ -488,6 +606,87 @@ function events.onPotTouchChange(potId, controlId, touched)
   if help then showHelp(help) end
 end
 
+function patchMode(valueObject, value)
+  local visibilityMap = {
+    [0] = { show = {}, hide = {166,174,216,226,317,321,58,231} },
+    [1] = { show = {216,226,321,231}, hide = {166,174,58,317} },
+    [2] = { show = {166,174,58,321,231}, hide = {216,226,317} },
+  }
+  if visibilityMap[value] then
+    if value == 0 then
+      parameterMap.set(deviceId, PT_VIRTUAL, 10029, 0)
+      SD_FLAG = 0 -- split/double flag off
+    end
+    local config = visibilityMap[value]
+    for _,id in ipairs(config.hide) do
+      local c = safeGet(id); if c then c:setVisible(false) end
+    end
+    for _,id in ipairs(config.show) do
+      local c = safeGet(id); if c then c:setVisible(true) end
+    end
+  end
+end
+
+function displaySD(valueObject, value)
+  local BANK_NAMES = {"A","B","C","D"}
+  local CTRL_UPPER_NAME_SINGLE = 166
+  local CTRL_LOWER_NAME_SINGLE = 174
+  local CTRL_UPPER_NAME_DOUBLE = 216
+  local CTRL_LOWER_NAME_DOUBLE = 226
+  local mode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
+  if not mode or mode == 0 then return end   -- nothing to show in single mode
+  local baseIndex
+  if mode == 2 then           
+    baseIndex = value + 1     -- -- split bank starts at sdMatrix[1]
+  elseif mode == 1 then       
+    baseIndex = value + 37    -- -- double bank starts at sdMatrix[37]
+  else
+    return
+  end
+  -- validate sdMatrix row exists
+  local row = sdMatrix[baseIndex]
+  if not row then return end
+  -- read row fields once; +1 conversions and floor just in case values are floats
+  local up = math.floor((row[1] or 0) + 1)
+  local ub = math.floor((row[2] or 0) + 1)
+  local lp = math.floor((row[3] or 0) + 1)
+  local lb = math.floor((row[4] or 0) + 1)
+  -- pick controls based on which half we're updating
+  local isFirstHalf = baseIndex >= 1 and baseIndex < 37
+  local ctrlUpper = isFirstHalf and CTRL_UPPER_NAME_SINGLE or CTRL_UPPER_NAME_DOUBLE
+  local ctrlLower = isFirstHalf and CTRL_LOWER_NAME_SINGLE or CTRL_LOWER_NAME_DOUBLE
+  -- set upper patch name if available
+  if nameBank and nameBank[ub] and nameBank[ub][up] then
+    local displayName = BANK_NAMES[ub] .. tostring(up) .. " " .. (nameBank[ub][up] or "")
+    controls.get(ctrlUpper):setName(displayName)
+  end
+  -- set lower patch name if available
+  if nameBank and nameBank[lb] and nameBank[lb][lp] then
+    controls.get(ctrlLower):setName(BANK_NAMES[lb]..lp.." "..nameBank[lb][lp])
+  end
+  -- parameter mappings (unified table: {targetParam, srcIndex, multiplier})
+  local param_map = {
+    {130, 8, 64},   -- Performance pitch bend range (/64)
+    {131, 9, 64},   -- Performance octave pitch transpose (/64)
+    {134, 10, 64},  -- Performance LFO depth (/64)
+    {132, 11, 64},  -- Performance LFO rate (/64)
+    {1280, 6, 1},   -- Performance keyboard split point
+    {133, 12, 1},   -- Performance LFO shape
+  }
+  for _, m in ipairs(param_map) do
+    local srcVal = row[m[2]] or 0
+    parameterMap.set(deviceId, PT_NRPN, m[1], srcVal * m[3])
+  end
+  -- pset mappings (keeps original grouping)
+  local pset_mappings = {
+    {{115,117,118,119}, row[5]},           -- Performance LFO mods
+    {{8,10,19,97,103,109}, row[7]},        -- Performance panel settings
+  }
+  for _, m in ipairs(pset_mappings) do
+    pset(m[1], m[2])
+  end
+end
+
 -- panning control parameter
 function setPanType(valueObject, type)
   if type == nil then return end
@@ -648,7 +847,7 @@ function displayPatch (valueObject, value)
   local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
   controls.get (209):setName(nameBank[bankNum][value])  -- display loaded patch names stored in nameBank
-  return (string.format("%03d",value))
+  return (string.format(bankTxt[bankNum]).." "..string.format("%03d",value))
 end
 
 --- requests to UB-Xa for data dumps ---
@@ -1472,9 +1671,9 @@ local mappings = {
 --    parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
     parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
   end
---  upperChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1159) + 1 
---  lowerChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1160) + 1
---  currentChannel = upperChannel
+  upperChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1159) + 1 
+  lowerChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1160) + 1
+  currentChannel = upperChannel
   print("global settings parsed. Number of bytes: ".. #data)
 end
 
@@ -1755,83 +1954,3 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   end
 end
 
-function patchMode(valueObject, value)
-  local visibilityMap = {
-    [0] = { show = {}, hide = {166,174,216,226,317,321,58,231} },
-    [1] = { show = {216,226,321,231}, hide = {166,174,58,317} },
-    [2] = { show = {166,174,58,321,231}, hide = {216,226,317} },
-  }
-  if visibilityMap[value] then
-    if value == 0 then
-      parameterMap.set(deviceId, PT_VIRTUAL, 10029, 0)
-      SD_FLAG = 0 -- split/double flag off
-    end
-    local config = visibilityMap[value]
-    for _,id in ipairs(config.hide) do
-      local c = safeGet(id); if c then c:setVisible(false) end
-    end
-    for _,id in ipairs(config.show) do
-      local c = safeGet(id); if c then c:setVisible(true) end
-    end
-  end
-end
-
-function displaySD(valueObject, value)
-  local BANK_NAMES = {"A","B","C","D"}
-  local CTRL_UPPER_NAME_SINGLE = 166
-  local CTRL_LOWER_NAME_SINGLE = 174
-  local CTRL_UPPER_NAME_DOUBLE = 216
-  local CTRL_LOWER_NAME_DOUBLE = 226
-  local mode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
-  if not mode or mode == 0 then return end   -- nothing to show in single mode
-  local baseIndex
-  if mode == 2 then           
-    baseIndex = value + 1     -- -- split bank starts at sdMatrix[1]
-  elseif mode == 1 then       
-    baseIndex = value + 37    -- -- double bank starts at sdMatrix[37]
-  else
-    return
-  end
-  -- validate sdMatrix row exists
-  local row = sdMatrix[baseIndex]
-  if not row then return end
-  -- read row fields once; +1 conversions and floor just in case values are floats
-  local up = math.floor((row[1] or 0) + 1)
-  local ub = math.floor((row[2] or 0) + 1)
-  local lp = math.floor((row[3] or 0) + 1)
-  local lb = math.floor((row[4] or 0) + 1)
-  -- pick controls based on which half we're updating
-  local isFirstHalf = baseIndex >= 1 and baseIndex < 37
-  local ctrlUpper = isFirstHalf and CTRL_UPPER_NAME_SINGLE or CTRL_UPPER_NAME_DOUBLE
-  local ctrlLower = isFirstHalf and CTRL_LOWER_NAME_SINGLE or CTRL_LOWER_NAME_DOUBLE
-  -- set upper patch name if available
-  if nameBank and nameBank[ub] and nameBank[ub][up] then
-    local displayName = BANK_NAMES[ub] .. tostring(up) .. " " .. (nameBank[ub][up] or "")
-    controls.get(ctrlUpper):setName(displayName)
-  end
-  -- set lower patch name if available
-  if nameBank and nameBank[lb] and nameBank[lb][lp] then
-    controls.get(ctrlLower):setName(BANK_NAMES[lb]..lp.." "..nameBank[lb][lp])
-  end
-  -- parameter mappings (unified table: {targetParam, srcIndex, multiplier})
-  local param_map = {
-    {130, 8, 64},   -- Performance pitch bend range (/64)
-    {131, 9, 64},   -- Performance octave pitch transpose (/64)
-    {134, 10, 64},  -- Performance LFO depth (/64)
-    {132, 11, 64},  -- Performance LFO rate (/64)
-    {1280, 6, 1},   -- Performance keyboard split point
-    {133, 12, 1},   -- Performance LFO shape
-  }
-  for _, m in ipairs(param_map) do
-    local srcVal = row[m[2]] or 0
-    parameterMap.set(deviceId, PT_NRPN, m[1], srcVal * m[3])
-  end
-  -- pset mappings (keeps original grouping)
-  local pset_mappings = {
-    {{115,117,118,119}, row[5]},           -- Performance LFO mods
-    {{8,10,19,97,103,109}, row[7]},        -- Performance panel settings
-  }
-  for _, m in ipairs(pset_mappings) do
-    pset(m[1], m[2])
-  end
-end
