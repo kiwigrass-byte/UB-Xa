@@ -10,6 +10,15 @@ local upperChannel = upperDevice:getChannel ()
 local lowerDevice  = devices.get(3)
 local lowerChannel = lowerDevice:getChannel()
 
+-- load the UB-Xa global settings when the preset is first loaded
+function preset.onLoad()
+  getGlobals(nil,1)
+end
+-- load the UB-Xa patch names from all 4 banks when the preset is first is first loaded AND read to give more time
+function preset.onReady()
+  pages.display(1)
+  getPatchNames(nil,1)
+end
 
 local function safeGet(id)
   local ok, c = pcall(controls.get, id)
@@ -28,6 +37,56 @@ function assignChannel(valueObject, value)
   currentPort      = currentDevice:getPort ()
   print("current channel now: "..tostring(currentChannel))
 end
+
+-- quant mode from parameter 535: 0=+Oct,1=+Semi,2=+Free,3=±Oct,4=±Semi,5=±Free
+-- quantized frequency callback (short name)
+local function roundNearest(n, step)
+  if step == 0 then return n end
+  if n >= 0 then
+    return math.floor((n + step/2) / step) * step
+  else
+    return math.ceil((n - step/2) / step) * step
+  end
+end
+
+local QUANT_MODES = {
+  [0] = { step = 768, symmetric = false }, -- +Octaves
+  [1] = { step = 64,  symmetric = false }, -- +Semitones
+  [2] = { free  = true },                  -- +Free
+  [3] = { step = 768, symmetric = true  }, -- +/- Octaves
+  [4] = { step = 64,  symmetric = true  }, -- +/- Semitones
+  [5] = { free  = true },                  -- +/- Free
+}
+
+local function freqQcb(valueObject, value)
+  local raw = tonumber(value) or 0               -- 0..16383
+  local signed = raw - 8192                      -- -8192..8191
+
+  local qmode = parameterMap.get(deviceId, PT_VIRTUAL, 535)
+  local mode = QUANT_MODES[qmode]
+
+  if not mode or mode.free then
+    parameterMap.set(deviceId, PT_NRPN, 513, raw) -- PT_NRPN for param 513
+    valueObject:setValue(raw)
+    return
+  end
+
+  local step = mode.step or 1
+  local qSigned = roundNearest(signed, step)
+
+  -- clamp negative values to 0 for positive-only modes
+  if not mode.symmetric and qSigned < 0 then qSigned = 0 end
+
+  if qSigned > 8191 then qSigned = 8191 end
+  if qSigned < -8192 then qSigned = -8192 end
+
+  local qRaw = qSigned + 8192
+
+  parameterMap.set(deviceId, PT_NRPN, 513, qRaw) -- write as NRPN
+  valueObject:setValue(qRaw)
+end
+
+controls.get(17):setPotCallback(freqQcb)
 
 local authorDate ="New Ignis 2024"
 local patchName = authorDate  -- initialize patch name displayed in RH corner 
@@ -69,16 +128,6 @@ for i = 1,16 do panDefValue[i] = 128 end -- all in center
 info.setText(authorDate)
 timer.setPeriod(500) -- Set timer tick rate (e.g., every 100 milliseconds)
 events.subscribe(POTS) -- for pot touch help
-
--- load the UB-Xa global settings when the preset is first loaded
-function preset.onLoad()
-  getGlobals(nil,1)
-end
--- load the UB-Xa patch names from all 4 banks when the preset is first is first loaded AND read to give more time
-function preset.onReady()
-  pages.display(1)
-  getPatchNames(nil,1)
-end
 
 -- for external control of sequencer start/stop if mid sync -> USB or DIM 
 function seqStartStop(valueObject, value)
