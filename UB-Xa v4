@@ -1,4 +1,8 @@
 -- Behringer UB-Xa
+-- ============================================================
+-- DEVICE SETUP & GLOBAL STATE
+-- ============================================================
+
 local MODEL_BYTE = 0x3A  -- set Desktop Model
 -- MODEL_BYTE = 0x21  -- Keyboard Model
 local currentDevice  = devices.get(1)
@@ -110,6 +114,10 @@ function preset.onReady()
   getPatchNames(nil,1)
 end
 
+-- ============================================================
+-- UTILITIES
+-- ============================================================
+
 local function safeGet(id)
   local ok, c = pcall(controls.get, id)
   return ok and c or nil
@@ -215,6 +223,10 @@ end
 function displayChar (valueObject, value)
   return string.char(value)
 end
+
+-- ============================================================
+-- OSC QUANTIZER
+-- ============================================================
 
 -- Multi-osc quantizer, mode labels and value formatters for UB-Xa preset
 -- Supports:
@@ -765,6 +777,10 @@ function events.onPotTouchChange(potId, controlId, touched)
   if help then showHelp(help) end
 end
 
+-- ============================================================
+-- UI / MODE SWITCHING
+-- ============================================================
+
 local function resetVirtualAndControl(paramId, ctrlId)
   parameterMap.set(deviceId, PT_VIRTUAL, paramId, 0)
   local c = safeGet(ctrlId)
@@ -918,6 +934,10 @@ function displaySD(valueObject, value)
   end
 end
 
+-- ============================================================
+-- PANNING
+-- ============================================================
+
 -- panning control parameter
 function setPanType(valueObject, type)
   if type == nil then return end
@@ -947,6 +967,10 @@ function setPanDefault(valueObject, value)
   local parameterNumber = valueObject:getMessage ():getParameterNumber ()
   panDefValue[parameterNumber + 1 - PARAMETER_IDS.VOICE_PAN_BASE] = value + 128
 end
+
+-- ============================================================
+-- BITMASK FUNCTIONS
+-- ============================================================
 
 -- bitmask helper function ---
 function sendBitmask(paramNumber, deviceId, paramList)
@@ -1020,6 +1044,10 @@ for functionName, paramNumber in pairs(BITMASK_FUNCTIONS) do
    applyBitmaskConfig(paramNumber)
  end
 end
+
+-- ============================================================
+-- PATCH SELECTION
+-- ============================================================
 
 -- helper function to extract ascii bytes from a number
 local function asciiBytesFromNumber(n, width)
@@ -1098,6 +1126,10 @@ function displayPatch (valueObject, value)
 end
 
 --- requests to UB-Xa for data dumps ---
+-- ============================================================
+-- MIDI DUMP REQUESTS
+-- ============================================================
+
 -- Current program data
 function getCurrentProgram(valueObject, value)
   if value == 0 then return end
@@ -1164,7 +1196,7 @@ end
 -- Stored atrophy profile data or the current patch's atrophy profile data 
 function getAtrophy(valueObject, value)
   if value == 0 then return end
-  local aNum = 49+(math.floor(parameterMap.get(deviceId, PT_VIRTUAL, 909))) -- atrophy profile ascii # (-> decimal)
+  local aNum = 49+(math.floor(parameterMap.get(deviceId, PT_VIRTUAL, VP.ATROPHY_PROF))) -- atrophy profile ascii # (-> decimal)
   if aNum < 57 then -- use one of the 8 stored atrophy profiles
     local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
       0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x41, 0x74, 0x72, 0x6F, 0x70, 
@@ -1200,6 +1232,10 @@ function getPatchNames(valueObject, value)
 --    sendTableWithDelay(currentPort, message, 1000)
   midi.sendSysex (currentPort, message)
 end
+
+-- ============================================================
+-- SYSEX PARSING
+-- ============================================================
 
 -------------------------------------------------------------------------
 -- parses the parameters of UB-Xa sysEx dump
@@ -1471,6 +1507,10 @@ local function collect_dump(sysexBlock, length)
   return temp
 end
 
+-- ============================================================
+-- SYSEX HANDLER
+-- ============================================================
+
 function midi.onSysex(midiInput, sysexBlock)
   local ok, err = pcall(function()
     local length = sysexBlock:getLength()
@@ -1547,6 +1587,10 @@ function midi.onSysex(midiInput, sysexBlock)
     print("onSysex: pcall failed: " .. tostring(err))
   end
 end
+
+-- ============================================================
+-- DUMP PROCESSORS
+-- ============================================================
 
 -- process an upper patch dump
 -- need to finish performance/panel settings parameters
@@ -1988,6 +2032,10 @@ function currentProgram(dump)
   print("current program settings parsed. Number of bytes: ".. #data)
 end
 
+-- ============================================================
+-- NRPN / CC PROCESSING
+-- ============================================================
+
 -- Construct a midi.onNrpn(callback) by listening to midi.onControlChange
 -- callback(channel, nrpnParam, value, info)
 -- nrpnParam = 0..16383 (msb*128 + lsb)
@@ -2138,12 +2186,16 @@ end
  end)
 
 
+-- ============================================================
+-- PARAMETER CHANGE HANDLER
+-- ============================================================
+
 function parameterMap.onChange(valueObjects, origin, midiValue)
   if origin ~= INTERNAL then return end
   local msg = valueObjects[1]:getMessage()
   local parameterNumber = msg:getParameterNumber()
   -- patch data when a patch selection has been made and after a program change executed
-  if parameterNumber == 6035 or parameterNumber == 6034 or parameterNumber == 6036 then
+  if parameterNumber == VP.PATCH_TRIG_B or parameterNumber == VP.PATCH_TRIG_A or parameterNumber == VP.PATCH_TRIG_C then
     if midiValue > 0 then
       local part = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PART_SEL)
       if part == 0 then
@@ -2156,7 +2208,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     end
   end
   -- atrophy data when a profile number has been selected
-  if parameterNumber == 909 then
+  if parameterNumber == VP.ATROPHY_PROF then
     if midiValue == 8 then -- profile saved in patch
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
                        0x03,0x00,0x42,0x49,0x4E,0x20,0x41,0x74,0x72,0x6F,0x70,
