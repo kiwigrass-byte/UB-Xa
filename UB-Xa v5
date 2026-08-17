@@ -85,6 +85,7 @@ local PARAMETER_IDS = {
 local CONTROL_IDS = {
   MIDI_TEMPO = 52,
   CUSTOM_BEND = 110,
+  SPLIT_SLOT_RESET = 116,
   SPLIT_UPPER_NAME = 166,
   SPLIT_LOWER_NAME = 174,
   PATCH_NAME = 209,
@@ -486,6 +487,7 @@ addPercentage127 = build_value_formatter({
 })
 addPercentage100 = build_value_formatter({
   pattern = "%.1f%%",
+  transform = function(v) return v end,
 })
 addPercentage10 = build_value_formatter({
   pattern = "%.1f%%",
@@ -627,9 +629,26 @@ local HELP_TEXTS = {
   },
 }
 
+local HELP_TEXT_PAGE_ORDER = {
+  "MANUAL_CONTROL",
+  "ARP_SEQ",
+  "MODULATION_LFO",
+  "ATROPHY",
+  "OSC",
+  "FILTER",
+  "ENVELOPES",
+  "PERFORMANCE_LFO",
+  "GLOBALS",
+  "GLOBALS_2",
+}
+
 local HELP_TEXTS_BY_CONTROL_ID = {}
-for _, page_texts in pairs(HELP_TEXTS) do
+for _, page_name in ipairs(HELP_TEXT_PAGE_ORDER) do
+  local page_texts = HELP_TEXTS[page_name] or {}
   for control_id, help_text in pairs(page_texts) do
+    if HELP_TEXTS_BY_CONTROL_ID[control_id] ~= nil then
+      print(string.format("Duplicate HELP_TEXTS entry for control %d (page %s)", control_id, page_name))
+    end
     HELP_TEXTS_BY_CONTROL_ID[control_id] = help_text
   end
 end
@@ -665,19 +684,19 @@ function patchMode(valueObject, value)
   if prevMode ~= nil and prevMode ~= value then
     -- transitions between 0 and 1 => reset 10030 + its control
     if (prevMode == MODE_PATCH and value == MODE_DOUBLE) or (prevMode == MODE_DOUBLE and value == MODE_PATCH) then
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.DOUBLE_SLOT, 216)
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.STICKY_PARAM, 226)
+      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.DOUBLE_SLOT, CONTROL_IDS.DOUBLE_UPPER_NAME)
+      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.STICKY_PARAM, CONTROL_IDS.DOUBLE_LOWER_NAME)
     end
     -- transitions between 1 and 2 => reset 10023 + its control
     if (prevMode == MODE_DOUBLE and value == MODE_SPLIT) or (prevMode == MODE_SPLIT and value == MODE_DOUBLE) then
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.SPLIT_SLOT, 116)
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.STICKY_PARAM, 174)
+      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.SPLIT_SLOT, CONTROL_IDS.SPLIT_SLOT_RESET)
+      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.STICKY_PARAM, CONTROL_IDS.SPLIT_LOWER_NAME)
     end
   end
   local visibilityMap = {
-    [MODE_PATCH] = { show = {}, hide = {216,226,166,174,321,58,231,329} },
-    [MODE_DOUBLE] = { show = {216,226,321,231,329}, hide = {58,166,174} },
-    [MODE_SPLIT] = { show = {166,174,58,321,231,329}, hide = {216,226} },
+    [MODE_PATCH] = { show = {}, hide = {CONTROL_IDS.DOUBLE_UPPER_NAME, CONTROL_IDS.DOUBLE_LOWER_NAME, CONTROL_IDS.SPLIT_UPPER_NAME, CONTROL_IDS.SPLIT_LOWER_NAME, 321,58,231,329} },
+    [MODE_DOUBLE] = { show = {CONTROL_IDS.DOUBLE_UPPER_NAME, CONTROL_IDS.DOUBLE_LOWER_NAME,321,231,329}, hide = {58,CONTROL_IDS.SPLIT_UPPER_NAME,CONTROL_IDS.SPLIT_LOWER_NAME} },
+    [MODE_SPLIT] = { show = {CONTROL_IDS.SPLIT_UPPER_NAME,CONTROL_IDS.SPLIT_LOWER_NAME,58,321,231,329}, hide = {CONTROL_IDS.DOUBLE_UPPER_NAME,CONTROL_IDS.DOUBLE_LOWER_NAME} },
   }
   if visibilityMap[value] then
     if value == MODE_PATCH then
@@ -695,10 +714,10 @@ function patchMode(valueObject, value)
   local TARGET_SLOT1 = 26
   local TARGET_SLOT2 = 27
   local TARGET_PAGE = 1
-  local c216  = controls.get(216)
-  local c226 = controls.get(226)
-  local c166  = controls.get(166)
-  local c174 = controls.get(174)
+  local c216  = controls.get(CONTROL_IDS.DOUBLE_UPPER_NAME)
+  local c226 = controls.get(CONTROL_IDS.DOUBLE_LOWER_NAME)
+  local c166  = controls.get(CONTROL_IDS.SPLIT_UPPER_NAME)
+  local c174 = controls.get(CONTROL_IDS.SPLIT_LOWER_NAME)
   if value == MODE_DOUBLE then
     c216:setSlot(TARGET_SLOT1, TARGET_PAGE)
     c226:setSlot(TARGET_SLOT2, TARGET_PAGE)
@@ -715,8 +734,8 @@ end
 function swapVoiceType(valueObject, value)
   local TARGET_SLOT = 20
   local TARGET_PAGE = 4
-  local c48  = controls.get(48)
-  local c53 = controls.get(53)
+  local c48  = controls.get(CONTROL_IDS.POLY_VOICE)
+  local c53 = controls.get(CONTROL_IDS.UNISON_VOICE)
   if value == 0 then
     c48:setSlot(TARGET_SLOT, TARGET_PAGE) -- move control 48 into page 4, slot 11
   else
@@ -726,10 +745,10 @@ end
 
 function displaySD(valueObject, value)
   local BANK_NAMES = {"A","B","C","D"}
-  local CTRL_UPPER_NAME_SINGLE = 166
-  local CTRL_LOWER_NAME_SINGLE = 174
-  local CTRL_UPPER_NAME_DOUBLE = 216
-  local CTRL_LOWER_NAME_DOUBLE = 226
+  local CTRL_UPPER_NAME_SINGLE = CONTROL_IDS.SPLIT_UPPER_NAME
+  local CTRL_LOWER_NAME_SINGLE = CONTROL_IDS.SPLIT_LOWER_NAME
+  local CTRL_UPPER_NAME_DOUBLE = CONTROL_IDS.DOUBLE_UPPER_NAME
+  local CTRL_LOWER_NAME_DOUBLE = CONTROL_IDS.DOUBLE_LOWER_NAME
   local mode = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.MODE)
   -- reset sticky params on specific mode transitions (both directions)
   if lastDisplaySDMode ~= nil and mode ~= nil and lastDisplaySDMode ~= mode then
@@ -851,36 +870,36 @@ function sendBitmask(paramNumber, deviceId, paramList)
 end
 
 local BITMASK_CONFIGS = {
- [PARAMETER_IDS.NRPN.CONTROL_PORTAMENTO_SETTINGS] = { params = {54,60,59,65} },
- [PARAMETER_IDS.NRPN.PERFORMANCE_SETTINGS] = {
-   params = {8,10,19,97,103,109},
-   after = function()
-     local bend_type = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PERFORMANCE_BEND_TYPE)
-     controls.get(CONTROL_IDS.CUSTOM_BEND):setVisible(bend_type == 1)
-   end,
- },
- [PARAMETER_IDS.NRPN.PERFORMANCE_LFO_MODS] = { params = {117,118,119} },
- [PARAMETER_IDS.NRPN.MODULATION_LFO_MODS] = { params = {37,38,39,40} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_SENDS] = { params = {50,51,27} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_MODS] = { params = {30,31} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_SENDS] = { params = {33,35,44} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_MODS] = { params = {49,46} },
- [PARAMETER_IDS.NRPN.FILTER_MODS] = { params = {136,137,138,139,140} },
- [PARAMETER_IDS.NRPN.AMP_MODS] = { params = {141,142,143,144,145} },
- [PARAMETER_IDS.NRPN.OSC_2_STATE] = { params = {2,9} },
- [PARAMETER_IDS.NRPN.OSC_1_STATE] = { params = {3,154,155} },
- [PARAMETER_IDS.NRPN.FILTER_MODES] = { params = {76,89} },
+  [PARAMETER_IDS.NRPN.CONTROL_PORTAMENTO_SETTINGS] = { params = {54,60,59,65} },
+  [PARAMETER_IDS.NRPN.PERFORMANCE_SETTINGS] = {
+    params = {8,10,19,97,103,109},
+    after = function()
+      local bend_type = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PERFORMANCE_BEND_TYPE)
+      controls.get(CONTROL_IDS.CUSTOM_BEND):setVisible(bend_type == 1)
+    end,
+  },
+  [PARAMETER_IDS.NRPN.PERFORMANCE_LFO_MODS] = { params = {117,118,119} },
+  [PARAMETER_IDS.NRPN.MODULATION_LFO_MODS] = { params = {37,38,39,40} },
+  [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_SENDS] = { params = {50,51,27} },
+  [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_MODS] = { params = {30,31} },
+  [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_SENDS] = { params = {33,35,44} },
+  [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_MODS] = { params = {49,46} },
+  [PARAMETER_IDS.NRPN.FILTER_MODS] = { params = {136,137,138,139,140} },
+  [PARAMETER_IDS.NRPN.AMP_MODS] = { params = {141,142,143,144,145} },
+  [PARAMETER_IDS.NRPN.OSC_2_STATE] = { params = {2,9} },
+  [PARAMETER_IDS.NRPN.OSC_1_STATE] = { params = {3,154,155} },
+  [PARAMETER_IDS.NRPN.FILTER_MODES] = { params = {76,89} },
 }
 
 local function make_bitmask_handler(param_number)
- return function(valueObject, value)
-   local config = BITMASK_CONFIGS[param_number]
-   if not config then return end
-   sendBitmask(param_number, deviceId, config.params)
-   if config.after then
-     config.after()
-   end
- end
+  return function(valueObject, value)
+    local config = BITMASK_CONFIGS[param_number]
+    if not config then return end
+    sendBitmask(param_number, deviceId, config.params)
+    if config.after then
+      config.after()
+    end
+  end
 end
 
 bitMask007 = make_bitmask_handler(PARAMETER_IDS.NRPN.CONTROL_PORTAMENTO_SETTINGS)
