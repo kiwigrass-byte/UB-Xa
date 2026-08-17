@@ -37,6 +37,7 @@ local lastDisplaySDMode = nil
 
 local PARAMETER_IDS = {
   VIRTUAL = {
+    PERFORMANCE_BEND_TYPE = 10,
     PAN_WIDTH = 201,
     MODE = 10028,
     PART_SEL = 10029,
@@ -971,7 +972,7 @@ local BITMASK_CONFIGS = {
  [PARAMETER_IDS.NRPN.PERFORMANCE_SETTINGS] = {
    params = {8,10,19,97,103,109},
    after = function()
-     local bendType = parameterMap.get(deviceId, PT_VIRTUAL, 10)
+     local bendType = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PERFORMANCE_BEND_TYPE)
      controls.get(CONTROL_IDS.CUSTOM_BEND):setVisible(bendType == 1)
    end,
  },
@@ -1032,7 +1033,6 @@ local function appendSequentialMappings(mappings, params, startIndex)
   for index, param in ipairs(params) do
     mappings[#mappings + 1] = {param, startIndex + index - 1}
   end
-  return mappings
 end
 
 -- patch select program change functions -----------------------------------------------------------------------------------------------------------
