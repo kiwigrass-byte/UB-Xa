@@ -321,7 +321,7 @@ function formatFreq2(valueObject, value)
   return formatFreqCommon(value, 536)
 end
 
-
+-- format midi tempo value display
 function showMidiTempo(valueObject,value)
   if value == 0 then
     controls.get (52):setVisible (true)
@@ -923,6 +923,29 @@ function selectIt(valueObject, value)
   -- Force a UI refresh for the updated slots:
   displaySD(nil, 0)   -- redraw slot 1 (sdMatrix[1])
   displaySD(nil, 36)  -- redraw slot 37 (sdMatrix[37])
+end
+
+function selectSD(valueObject, value)
+  if value==0 then return end
+  local message = valueObject:getMessage ()
+  local parameterNumber = message:getParameterNumber ()
+  local messageValue = message:getValue ()
+  local mode = parameterMap.get (deviceId, PT_VIRTUAL, 10028)
+  local v = 0
+  if mode == 0 then return
+  elseif mode == 1 then  
+    v = parameterMap.get (deviceId, PT_VIRTUAL, 10030) + 1 -- only can load 35 stored doubles
+  elseif mode == 2 then  
+    v = parameterMap.get (deviceId, PT_VIRTUAL, 10023) + 1 -- only can load 35 stored splits
+  end
+  local bankLSB = {sdMatrix[v][2],sdMatrix[v][4]}
+  local progNum = {sdMatrix[v][1],sdMatrix[v][3]}
+  print (string.format("selecting upper patch: Bank = %d, Prog = %d, Channel = %d", bankLSB[1], progNum[1], ubxaUpperCh))
+  midi.sendControlChange(currentPort , ubxaUpperCh , 32, bankLSB[1])
+  midi.sendProgramChange(currentPort , ubxaUpperCh , progNum[1])
+  print (string.format("selecting lower patch: Bank = %d, Prog = %d, Channel = %d", bankLSB[2], progNum[2], ubxaLowerCh))
+  midi.sendControlChange(currentPort , ubxaLowerCh , 32, bankLSB[2])
+  midi.sendProgramChange(currentPort , ubxaLowerCh , progNum[2])
 end
 
 function displayPatch (valueObject, value)
@@ -1799,6 +1822,7 @@ function splitDouble(dump)
     end
   end
 --[[
+  -- for debugging
   for i = 1, 72 do
     local row_str = ""
     for j = 1, 12 do
@@ -1809,22 +1833,6 @@ function splitDouble(dump)
   end
 ]]
   print("split double settings parsed. Number of bytes: ".. #data)
-end
-
--- process a current program dump
--- not used
-function currentProgram(dump)
-  -- parse of the incoming dump
-  local result = parse_sysex(dump)
-  if not result or type(result.data) ~= "table" then
-    print("Could not read data")
-    return
-  end
-  local data = result.data
-  for i = 1,#data do 
-    print("current program: byte values: ".. i .. ": " .. data[i])
-  end
-  print("current program settings parsed. Number of bytes: ".. #data)
 end
 
 -- for patch name dump
@@ -1852,8 +1860,24 @@ function patchNames(dump)
   print("patch names parsed. Number of bytes: ".. #data)
 end
 
--- midi.onNrpn(callback) by listening to midi.onControlChange
--- Callback signature: callback(channel, nrpnParam, value, info)
+-- process a current program dump
+-- not used
+function currentProgram(dump)
+  -- parse of the incoming dump
+  local result = parse_sysex(dump)
+  if not result or type(result.data) ~= "table" then
+    print("Could not read data")
+    return
+  end
+  local data = result.data
+  for i = 1,#data do 
+    print("current program: byte values: ".. i .. ": " .. data[i])
+  end
+  print("current program settings parsed. Number of bytes: ".. #data)
+end
+
+-- Construct a midi.onNrpn(callback) by listening to midi.onControlChange
+-- callback(channel, nrpnParam, value, info)
 -- nrpnParam = 0..16383 (msb*128 + lsb)
 -- value = combined 14-bit value if LSB available, otherwise 7-bit MSB value (or amount for inc/dec)
 -- info.type = "data_entry_msb" | "data_entry_lsb" | "inc" | "dec"
@@ -1971,7 +1995,7 @@ function midi.onNrpn(callback)
   end
 end
 
--- nrpn callback to update patch virtual parameters if nrpn values changed on the UB-Xa hardware:
+-- nrpn callback to update patch virtual parameters if nrpn values are changed on the UB-Xa
  midi.onNrpn(function(channel, nrpn, value, info)
 --   print(string.format("CH%d NRPN %d -> %d (%s)", channel, nrpn, value, info.type))
   if nrpn == 261 then 
