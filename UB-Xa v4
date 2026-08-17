@@ -18,17 +18,23 @@ local channelsFromSynth = true
 local authorDate ="New Ignis 2024"
 local patchName = authorDate  -- initialize patch name displayed in RH corner 
 local amountTicks = 0  -- Tracks how many ticks have passed
+info.setText(authorDate)
+timer.setPeriod(500) -- Set timer tick rate (e.g., every 500 milliseconds)
+
+events.subscribe(POTS) -- for pot touch help
 
 -- initialize nrpm callback function data
 local nrpn_state = {}
 local nrpn_callback = nil
 local registered = false
 
+local SD_FLAG = 0 -- flag if using patch or split-double performance parameters instead of patch version
+
 -- load the UB-Xa global settings when the preset is first loaded
 function preset.onLoad()
   getGlobals(nil,1)
 end
--- load the UB-Xa patch names from all 4 banks when the preset is first is first loaded AND read to give more time
+-- load the UB-Xa patch names from all 4 banks when the preset is first loaded AND read to give more time for dump
 function preset.onReady()
   pages.display(1)
   getPatchNames(nil,1)
@@ -40,8 +46,7 @@ local function safeGet(id)
 end
 
 -- Normalize incoming channel to Electra's expected range.
--- Set CHANNEL_BASE to 1 if your parsed UB-Xa value is 1..16.
--- Set CHANNEL_BASE to 0 if your parsed UB-Xa value is already 0..15.
+-- Set CHANNEL_BASE to 0 since UB-Xa channel value is 0..15.
 local CHANNEL_BASE = 0
 
 local function normalizeChannel(ch)
@@ -64,7 +69,6 @@ end
 local function applySynthChannels()
   if ubxaUpperCh ~= nil then upperDevice:setChannel(ubxaUpperCh) end
   if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
-
   -- keep currentDevice in sync with selected part
   -- value mapping in your code: 0 = upper, 1 = lower
   local partSel = parameterMap.get(deviceId, PT_VIRTUAL, 10029)
@@ -73,7 +77,6 @@ local function applySynthChannels()
   elseif partSel == 1 and ubxaLowerCh ~= nil then
     currentDevice:setChannel(ubxaLowerCh)
   end
-
   refreshCurrentDeviceSnapshot()
 end
 
@@ -94,22 +97,8 @@ function assignChannel(valueObject, value)
     end
   end
   refreshCurrentDeviceSnapshot()
-  print("current channel now: "..tostring(currentChannel))
+--  print("current channel now: "..tostring(currentChannel))
 end
---[[
-function assignChannel(valueObject, value)
-  if value == 0 then -- upper
-    currentDevice:setChannel( upperDevice:getChannel()  )
-  elseif value == 1 then -- lower
-    currentDevice:setChannel( lowerDevice:getChannel()  )
-  end
-  -- refresh the snapshot from the device so print shows the new channel, port Id
-  currentChannel = currentDevice:getChannel()
-  deviceId = currentDevice:getId()
-  currentPort      = currentDevice:getPort ()
-  print("current channel now: "..tostring(currentChannel))
-end
-]]
 
 -- helper function to make a matrix. fill is optional
 local function initMatrix(rows, cols, fill)
@@ -133,15 +122,8 @@ end
 local nameBank = initMatrix(128,4,"PATCH")
 local sdMatrix = initMatrix(72,12) -- initialize matrix to store split double data (72 x 12)
 
--- initialize split double patch data
-local SD_FLAG = 0 -- flag if using patch or split-double performance parameters instead of patch version
-
 local panDefValue = {} -- initailize panning
 for i = 1,16 do panDefValue[i] = 128 end -- all in center
-
-info.setText(authorDate)
-timer.setPeriod(500) -- Set timer tick rate (e.g., every 100 milliseconds)
-events.subscribe(POTS) -- for pot touch help
 
 -- for external control of sequencer start/stop if mid sync -> USB or DIM 
 function seqStartStop(valueObject, value)
@@ -166,7 +148,7 @@ end
 
 -- Multi-osc quantizer, mode labels and value formatters for UB-Xa preset
 -- Supports:
---  - freqQ1 : oscillator 1 editor Function (NRPN 513, quant param 535, control id 17)
+--  - freqQ1 : oscillator 1 editor Function (NRPN 513, quant param 535, control id 328)
 --  - freqQ2 : oscillator 2 editor Function (NRPN 515, quant param 536, control id 95)
 --  - formatFreq1 / formatFreq2 as Value formatter functions to show human-friendly text
 --
@@ -280,13 +262,13 @@ local function normalizeIncomingToSigned(incoming)
   return clamp(incoming, SIGN_MIN, SIGN_MAX)
 end
 
--- Osc 1: NRPN param 513, quant param 535, control id 17 -> function name freqQ1
+-- Osc 1: NRPN param 513, quant param 535, control id 328 -> function name freqQ1
 function freqQ1(valueObject, value)
   local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
   local incoming = normalizeIncomingToSigned(raw_in)
   local qRaw, n, mode = quantizeSignedFor(incoming, 535)
   parameterMap.set(deviceId, PT_NRPN, 513, qRaw)
-  applyQuantResult(qRaw, n, mode, 17, valueObject, 535)
+  applyQuantResult(qRaw, n, mode, 328, valueObject, 535)
 end
 
 -- Osc 2: NRPN param 515, quant param 536, control id 95 -> function name freqQ2
@@ -307,7 +289,7 @@ function formatFreq1(valueObject, value)
     local showOct = mode.octave_display or (semitones % 12 == 0)
     if showOct then
       local oct = semitones / 12
---      return string.format("%+d oct (%+d st)", oct, semitones)
+      return string.format("%+d oct (%+d st)", oct, semitones)
     else
       return string.format("%+d st", semitones)
     end
@@ -324,7 +306,7 @@ function formatFreq2(valueObject, value)
     local showOct = mode.octave_display or (semitones % 12 == 0)
     if showOct then
       local oct = semitones / 12
---      return string.format("%+d oct (%+d st)", oct, semitones)
+      return string.format("%+d oct (%+d st)", oct, semitones)
     else
       return string.format("%+d st", semitones)
     end
@@ -1751,26 +1733,31 @@ function global(dump)
 --    parameterMap.set(deviceId, PT_NRPN, p[1], data[p[2]])
     parameterMap.updateValue(deviceId, PT_NRPN, p[1], data[p[2]])
   end
--- MIDI channel settings done separately in case want to be read only
-local mappings = {
+  -- MIDI channel settings done separately and made read only (PT_VIRTUAL)
+  local mappings = {
     {1157, 20}, -- upper midi rx channel 
     {1158, 21}, -- lower midi rx channel
     {1159, 22}, -- upper midi tx channel
     {1160, 23}, -- lower midi tx channel 
-}
+  }
   -- Batch assign MIDI channel parameters (read only )
   for _, p in ipairs(mappings) do
---    parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
-    parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
+    parameterMap.set(deviceId, PT_NONE, p[1], data[p[2]])
   end
--- Read raw channel values from UB-Xa params
-  local rawUpper = parameterMap.get(deviceId, PT_VIRTUAL, 1159)
-  local rawLower = parameterMap.get(deviceId, PT_VIRTUAL, 1160)
-  -- Store synth truth first
-  ubxaUpperCh = normalizeChannel(rawUpper)
+  -- Read raw channel values from UB-Xa params
+  -- UB-Xa gives 0..15 so add 1
+  local rawUpper = parameterMap.get(deviceId, PT_NONE, 1159) + 1
+  local rawLower = parameterMap.get(deviceId, PT_NONE, 1160) + 1
+  ubxaUpperCh = normalizeChannel(rawUpper)  -- with CHANNEL_BASE=0
   ubxaLowerCh = normalizeChannel(rawLower)
-  -- Now apply once
-  applySynthChannels()
+  -- Mirror into the UI devices
+  if ubxaUpperCh ~= nil then upperDevice:setChannel(ubxaUpperCh) end
+  if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
+  -- Re-apply to current device based on part selector
+  applySynthChannels()         -- should set currentDevice channel
+  refreshCurrentDeviceSnapshot()
+  print(string.format("UBXA raw U/L=%s/%s -> Electra U/L=%s/%s",
+  tostring(rawUpper), tostring(rawLower), tostring(ubxaUpperCh), tostring(ubxaLowerCh)))
   print("global settings parsed. Number of bytes: ".. #data)
 end
 
