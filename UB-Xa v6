@@ -123,7 +123,7 @@ end
 local patchNameBank = initMatrix(4,128,"PATCH")
 local splitDoubleMatrix = initMatrix(72,12) -- initialize matrix to store split double data (72 x 12)
 
-local panDefaultValues = {} -- initailize panning
+local panDefaultValues = {} -- initialize panning
 for i = 1,16 do panDefaultValues[i] = 128 end -- all in center
 
 -- for external control of sequencer start/stop if mid sync -> USB or DIM 
@@ -156,7 +156,7 @@ end
 -- Behavior:
 --  - Signed display domain: -8192 .. +8191 (but also accepts 0..16383 unsigned and converts)
 --  - Semitone interaction for octave modes (fine control), snaps final NRPN to exact octaves
---  - Labels control name to concise mode (e.g. "Transpose +Octaves"), value formatter shows formatSemitones/octaves
+--  - Labels control name to concise mode (e.g. "Transpose +Octaves"), value formatter shows semitones/octaves
 --  - Writes exact 14-bit NRPN values to the synth (no approximation)
 
 local STEP_SEMITONE = 64
@@ -168,7 +168,7 @@ local SIGN_MIN, SIGN_MAX = -8192, 8191
 -- tweak sensitivity if needed (<1 = more sensitive, >1 = less)
 local SENSITIVITY = 1.0
 
--- minSemitones / maxSemitones are in formatSemitones
+-- minSemitones / maxSemitones are in semitones
 local QUANT_MODES = {
   -- octave modes use semitone stepping for interaction but show octaves
   [0] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octaveDisplay = true,  minSemitones = 0,   maxSemitones = 36 }, -- +Octaves (0..+3 oct)
@@ -294,15 +294,15 @@ local function formatFreqCommon(value, quantParam)
   local signed = normalizeIncomingToSigned(value)
   local _, n, mode = quantizeSignedFor(signed, quantParam)
   if mode and mode.quant then
-    local formatSemitones = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
-    local showOct = mode.octaveDisplay or (formatSemitones % 12 == 0)
+    local semitoneValue = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
+    local showOct = mode.octaveDisplay or (semitoneValue % 12 == 0)
     if showOct then
-      local oct = formatSemitones / 12
+      local oct = semitoneValue / 12
       local octaveInteger = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
       return string.format("%+d oct", octaveInteger)
     end
 
-    local semitoneInteger = (formatSemitones >= 0) and math.floor(formatSemitones + 0.5) or math.ceil(formatSemitones - 0.5)
+    local semitoneInteger = (semitoneValue >= 0) and math.floor(semitoneValue + 0.5) or math.ceil(semitoneValue - 0.5)
     return string.format("%+d st", semitoneInteger)
   end
   return tostring(signed)
@@ -405,29 +405,29 @@ end
 function formatDivide4(valueObject, value)
     return (string.format ("%.1f", value/4))
 end
--- Add formatSemitones, scaled to 128 = 0
+-- Add semitones, scaled to 128 = 0
 function formatSemitones128 (valueObject, value)
-    return (string.format ("%i formatSemitones", value-128))
+    return (string.format ("%i semitones", value-128))
 end
--- Add formatSemitones, scaled to 64 = 0
+-- Add semitones, scaled to 64 = 0
 function formatSemitones64 (valueObject, value)
-    return (string.format ("%i formatSemitones", value-64))
+    return (string.format ("%i semitones", value-64))
 end
--- Add formatSemitones, divided by 8
+-- Add semitones, divided by 8
 function formatSemitones8 (valueObject, value)
-    return (string.format ("%.2f formatSemitones", value/8))
+    return (string.format ("%.2f semitones", value/8))
 end
--- Add formatSemitones
+-- Add semitones
 function formatSemitones (valueObject, value)
-    return (string.format ("%d formatSemitones", value))
+    return (string.format ("%d semitones", value))
 end
--- Add formatCents 
+-- Add cents 
 function formatCents (valueObject, value)
-    return (string.format ("%d formatCents", value))
+    return (string.format ("%d cents", value))
 end
 -- atrophy parameter formats from sysex guide
 function formatTrackOffset (valueObject, value)
-    return (string.format ("%d formatSemitones", -value))
+    return (string.format ("%d semitones", -value))
 end
 function formatFrequencyToHertz1 (valueObject, value)
   local hertzValue = (2^((value-255)/27.63083863))*60
