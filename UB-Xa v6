@@ -11,24 +11,24 @@ local lowerDevice  = devices.get(3)
 local lowerChannel = lowerDevice:getChannel()
 
 -- UB-Xa-reported channels (source of truth when available)
-local ubxaUpperCh = nil
-local ubxaLowerCh = nil
+local synthUpperChannel = nil
+local synthLowerChannel = nil
 local channelsFromSynth = true
 
 local authorDate ="New Ignis 2024"
 local patchName = authorDate  -- initialize patch name displayed in RH corner 
-local amountTicks = 0  -- Tracks how many ticks have passed
+local tickCounter = 0  -- Tracks how many ticks have passed
 info.setText(authorDate)
 timer.setPeriod(500) -- Set timer tick rate (e.g., every 500 milliseconds)
 
 events.subscribe(POTS) -- for pot touch help
 
 -- initialize nrpm callback function data
-local nrpn_state = {}
-local nrpn_callback = nil
+local nrpnState = {}
+local nrpnCallback = nil
 local registered = false
 
-local SD_FLAG = 0 -- flag if using patch or split-double performance parameters instead of patch version
+local splitDoubleFlag = 0 -- flag if using patch or split-double performance parameters instead of patch version
 local lastDisplaySDMode = nil
 
 -- load the UB-Xa global settings when the preset is first loaded
@@ -42,23 +42,23 @@ function preset.onReady()
 end
 
 local function safeGet(id)
-  local ok, c = pcall(controls.get, id)
-  return ok and c or nil
+  local ok, control = pcall(controls.get, id)
+  return ok and control or nil
 end
 
 -- Normalize incoming channel to Electra's expected range.
 -- Set CHANNEL_BASE to 0 since UB-Xa channel value is 0..15.
 local CHANNEL_BASE = 0
 
-local function normalizeChannel(ch)
-  ch = tonumber(ch)
-  if not ch then return nil end
+local function normalizeChannel(channel)
+  channel = tonumber(channel)
+  if not channel then return nil end
   if CHANNEL_BASE == 1 then
-    ch = ch - 1
+    channel = channel - 1
   end
-  if ch < 0 then ch = 0 end
-  if ch > 15 then ch = 15 end
-  return ch
+  if channel < 0 then channel = 0 end
+  if channel > 15 then channel = 15 end
+  return channel
 end
 
 local function refreshCurrentDeviceSnapshot()
@@ -68,26 +68,26 @@ local function refreshCurrentDeviceSnapshot()
 end
 
 local function applySynthChannels()
-  if ubxaUpperCh ~= nil then upperDevice:setChannel(ubxaUpperCh) end
-  if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
+  if synthUpperChannel ~= nil then upperDevice:setChannel(synthUpperChannel) end
+  if synthLowerChannel ~= nil then lowerDevice:setChannel(synthLowerChannel) end
   -- keep currentDevice in sync with selected part
   -- value mapping in your code: 0 = upper, 1 = lower
   local partSel = parameterMap.get(deviceId, PT_VIRTUAL, 10029)
-  if partSel == 0 and ubxaUpperCh ~= nil then
-    currentDevice:setChannel(ubxaUpperCh)
-  elseif partSel == 1 and ubxaLowerCh ~= nil then
-    currentDevice:setChannel(ubxaLowerCh)
+  if partSel == 0 and synthUpperChannel ~= nil then
+    currentDevice:setChannel(synthUpperChannel)
+  elseif partSel == 1 and synthLowerChannel ~= nil then
+    currentDevice:setChannel(synthLowerChannel)
   end
   refreshCurrentDeviceSnapshot()
 end
 
 function assignChannel(valueObject, value)
   -- Prefer UB-Xa-reported channels when both are known
-  if channelsFromSynth and ubxaUpperCh ~= nil and ubxaLowerCh ~= nil then
+  if channelsFromSynth and synthUpperChannel ~= nil and synthLowerChannel ~= nil then
     if value == 0 then -- upper
-      currentDevice:setChannel(ubxaUpperCh)
+      currentDevice:setChannel(synthUpperChannel)
     elseif value == 1 then -- lower
-      currentDevice:setChannel(ubxaLowerCh)
+      currentDevice:setChannel(synthLowerChannel)
     end
   else
     -- Fallback to Electra editor UI settings
@@ -105,26 +105,26 @@ end
 local function initMatrix(rows, cols, fill)
   if rows <= 0 or cols <= 0 then return {} end
   if fill == nil then fill = 0 end
-  local m = {}
-  for r = 1, rows do
+  local matrix = {}
+  for rowIndex = 1, rows do
     local row = {}
-    for c = 1, cols do
+    for columnIndex = 1, cols do
       if type(fill) == "function" then
-        row[c] = fill(r, c)
+        row[columnIndex] = fill(rowIndex, columnIndex)
       else
-        row[c] = fill
+        row[columnIndex] = fill
       end
     end
-    m[r] = row
+    matrix[rowIndex] = row
   end
-  return m
+  return matrix
 end
 
-local nameBank = initMatrix(4,128,"PATCH")
-local sdMatrix = initMatrix(72,12) -- initialize matrix to store split double data (72 x 12)
+local patchNameBank = initMatrix(4,128,"PATCH")
+local splitDoubleMatrix = initMatrix(72,12) -- initialize matrix to store split double data (72 x 12)
 
-local panDefValue = {} -- initailize panning
-for i = 1,16 do panDefValue[i] = 128 end -- all in center
+local panDefaultValues = {} -- initialize panning
+for i = 1,16 do panDefaultValues[i] = 128 end -- all in center
 
 -- for external control of sequencer start/stop if mid sync -> USB or DIM 
 function seqStartStop(valueObject, value)
@@ -135,23 +135,23 @@ end
 
 -- for starting and stopping the timer for displaying names and help text
 function timer.onTick()
-  amountTicks = amountTicks + 1
-  if amountTicks > 4 then
+  tickCounter = tickCounter + 1
+  if tickCounter > 4 then
     timer.disable()
     info.setText(patchName)
   end
 end
 
 -- display functions -----------------------------------------------------------------------------------------------------------
-function displayChar (valueObject, value)
+function formatCharacter (valueObject, value)
   return string.char(value)
 end
 
 -- Multi-osc quantizer, mode labels and value formatters for UB-Xa preset
 -- Supports:
---  - freqQ1 : oscillator 1 editor Function (NRPN 513, quant param 535, control id 328)
---  - freqQ2 : oscillator 2 editor Function (NRPN 515, quant param 536, control id 95)
---  - formatFreq1 / formatFreq2 as Value formatter functions to show human-friendly text
+--  - quantizeOscillator1Frequency : oscillator 1 editor Function (NRPN 513, quant param 535, control id 328)
+--  - quantizeOscillator2Frequency : oscillator 2 editor Function (NRPN 515, quant param 536, control id 95)
+--  - formatOscillator1Frequency / formatOscillator2Frequency as Value formatter functions to show human-friendly text
 --
 -- Behavior:
 --  - Signed display domain: -8192 .. +8191 (but also accepts 0..16383 unsigned and converts)
@@ -168,15 +168,15 @@ local SIGN_MIN, SIGN_MAX = -8192, 8191
 -- tweak sensitivity if needed (<1 = more sensitive, >1 = less)
 local SENSITIVITY = 1.0
 
--- min_st / max_st are in semitones
+-- minSemitones / maxSemitones are in semitones
 local QUANT_MODES = {
   -- octave modes use semitone stepping for interaction but show octaves
-  [0] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = true,  min_st = 0,   max_st = 36 }, -- +Octaves (0..+3 oct)
-  [1] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = false, min_st = 0,   max_st = 36 }, -- +Semitones (0..+36 st)
-  [2] = { quant = false,                      symmetric = false, octave_display = false, min_st = 0,   max_st = 36 }, -- +Free (clamped 0..+36 st)
-  [3] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = true,  min_st = -48, max_st = 36 }, -- +/- Octaves (-4..+3 oct)
-  [4] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = false, min_st = -48, max_st = 36 }, -- +/- Semitones (-48..+36 st)
-  [5] = { quant = false,                      symmetric = true,  octave_display = false, min_st = -48, max_st = 36 }, -- +/- Free (same clamp range)
+  [0] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octaveDisplay = true,  minSemitones = 0,   maxSemitones = 36 }, -- +Octaves (0..+3 oct)
+  [1] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octaveDisplay = false, minSemitones = 0,   maxSemitones = 36 }, -- +Semitones (0..+36 st)
+  [2] = { quant = false,                      symmetric = false, octaveDisplay = false, minSemitones = 0,   maxSemitones = 36 }, -- +Free (clamped 0..+36 st)
+  [3] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octaveDisplay = true,  minSemitones = -48, maxSemitones = 36 }, -- +/- Octaves (-4..+3 oct)
+  [4] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octaveDisplay = false, minSemitones = -48, maxSemitones = 36 }, -- +/- Semitones (-48..+36 st)
+  [5] = { quant = false,                      symmetric = true,  octaveDisplay = false, minSemitones = -48, maxSemitones = 36 }, -- +/- Free (same clamp range)
 }
 
 local function clamp(x, lo, hi) if x < lo then return lo end if x > hi then return hi end return x end
@@ -198,15 +198,15 @@ local function readQuantModeFor(quantParam)
   return tonumber(q)
 end
 
--- Quantize given signed display value (signed_in in -8192..+8191) for given quantParam.
+-- Quantize given signed display value (signedInput in -8192..+8191) for given quantParam.
 -- Returns quantized raw14 value (0..16383), integer n (step multiplier), and mode table.
-local function quantizeSignedFor(signed_in, quantParam)
-  local signed = clamp(tonumber(signed_in) or 0, SIGN_MIN, SIGN_MAX)
+local function quantizeSignedFor(signedInput, quantParam)
+  local signed = clamp(tonumber(signedInput) or 0, SIGN_MIN, SIGN_MAX)
   local qmode = readQuantModeFor(quantParam)
   local mode = QUANT_MODES[qmode] or QUANT_MODES[2]
 
-  local minSigned = (mode.min_st ~= nil) and (mode.min_st * STEP_SEMITONE) or SIGN_MIN
-  local maxSigned = (mode.max_st ~= nil) and (mode.max_st * STEP_SEMITONE) or SIGN_MAX
+  local minSigned = (mode.minSemitones ~= nil) and (mode.minSemitones * STEP_SEMITONE) or SIGN_MIN
+  local maxSigned = (mode.maxSemitones ~= nil) and (mode.maxSemitones * STEP_SEMITONE) or SIGN_MAX
   signed = clamp(signed, minSigned, maxSigned)
 
   -- free modes
@@ -217,7 +217,7 @@ local function quantizeSignedFor(signed_in, quantParam)
   end
 
   -- octave-display modes: quantize in octave units directly
-  if mode.octave_display then
+  if mode.octaveDisplay then
     local oct = signed / STEP_OCTAVE
     local octN = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
 
@@ -250,11 +250,11 @@ end
 
 -- Helper to apply quant result to UI
 local function applyQuantResult(qRaw, n, mode, ctrlId, valueObject, quantParam)
-  local signed_out = qRaw - CENTER_RAW
+  local signedOutput = qRaw - CENTER_RAW
   local ctrl = valueObject
   if not ctrl then ctrl = safeGet(ctrlId) end
   if ctrl and type(ctrl.setValue) == "function" then
-    pcall(function() ctrl:setValue(signed_out) end)
+    pcall(function() ctrl:setValue(signedOutput) end)
   end
 end
 
@@ -271,19 +271,19 @@ local function normalizeIncomingToSigned(incoming)
   return clamp(incoming, SIGN_MIN, SIGN_MAX)
 end
 
--- Osc 1: NRPN param 513, quant param 535, control id 328 -> function name freqQ1
-function freqQ1(valueObject, value)
-  local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
-  local incoming = normalizeIncomingToSigned(raw_in)
+-- Osc 1: NRPN param 513, quant param 535, control id 328 -> function name quantizeOscillator1Frequency
+function quantizeOscillator1Frequency(valueObject, value)
+  local rawInput = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
+  local incoming = normalizeIncomingToSigned(rawInput)
   local qRaw, n, mode = quantizeSignedFor(incoming, 535)
   parameterMap.set(deviceId, PT_NRPN, 513, qRaw)
   applyQuantResult(qRaw, n, mode, 328, valueObject, 535)
 end
 
--- Osc 2: NRPN param 515, quant param 536, control id 95 -> function name freqQ2
-function freqQ2(valueObject, value)
-  local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
-  local incoming = normalizeIncomingToSigned(raw_in)
+-- Osc 2: NRPN param 515, quant param 536, control id 95 -> function name quantizeOscillator2Frequency
+function quantizeOscillator2Frequency(valueObject, value)
+  local rawInput = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
+  local incoming = normalizeIncomingToSigned(rawInput)
   local qRaw, n, mode = quantizeSignedFor(incoming, 536)
   parameterMap.set(deviceId, PT_NRPN, 515, qRaw)
   applyQuantResult(qRaw, n, mode, 95, valueObject, 536)
@@ -294,30 +294,30 @@ local function formatFreqCommon(value, quantParam)
   local signed = normalizeIncomingToSigned(value)
   local _, n, mode = quantizeSignedFor(signed, quantParam)
   if mode and mode.quant then
-    local semitones = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
-    local showOct = mode.octave_display or (semitones % 12 == 0)
+    local semitoneValue = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
+    local showOct = mode.octaveDisplay or (semitoneValue % 12 == 0)
     if showOct then
-      local oct = semitones / 12
-      local oct_i = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
-      return string.format("%+d oct", oct_i)
+      local oct = semitoneValue / 12
+      local octaveInteger = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
+      return string.format("%+d oct", octaveInteger)
     end
 
-    local st_i = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
-    return string.format("%+d st", st_i)
+    local semitoneInteger = (semitoneValue >= 0) and math.floor(semitoneValue + 0.5) or math.ceil(semitoneValue - 0.5)
+    return string.format("%+d st", semitoneInteger)
   end
   return tostring(signed)
 end
 
-function formatFreq1(valueObject, value)
+function formatOscillator1Frequency(valueObject, value)
   return formatFreqCommon(value, 535)
 end
 
-function formatFreq2(valueObject, value)
+function formatOscillator2Frequency(valueObject, value)
   return formatFreqCommon(value, 536)
 end
 
 -- format midi tempo value display
-function showMidiTempo(valueObject,value)
+function formatMidiTempo(valueObject,value)
   if value == 0 then
     controls.get (52):setVisible (true)
   else
@@ -327,7 +327,7 @@ end
 
 ---- value formater functions ----
 -- format per voice Pan
-function fmtPan(valueObject,value)
+function formatPan(valueObject,value)
   local control = valueObject:getControl():getId()
   local side =" L"
   if (value < 0 ) then 
@@ -343,7 +343,7 @@ function fmtPan(valueObject,value)
 end
 
 -- format master output Pan
-function fmtMasterPan(valueObject,value)
+function formatMasterPan(valueObject,value)
   local control = valueObject:getControl():getId()
   local side =" L"
   if (value < 0 ) then 
@@ -359,7 +359,7 @@ function fmtMasterPan(valueObject,value)
 end
 
 -- format split/double Balance
-function fmtBalance(valueObject,value)
+function formatBalance(valueObject,value)
   local control = valueObject:getControl():getId()
   local side =" >> LOWER"
   if (value < 0 ) then 
@@ -375,107 +375,107 @@ function fmtBalance(valueObject,value)
 end
 
 -- Add % sign
-function percentage255 (valueObject, value)
+function formatPercentage255 (valueObject, value)
     return (string.format ("%.2f%%", 100*(value-128)/255))
 end
-function addPercentage63 (valueObject, value)
+function formatPercentageOffset63 (valueObject, value)
     return (string.format ("%.1f%%", value/0.63))
 end
-function addPercentage255 (valueObject, value)
+function formatPercentageOffset255 (valueObject, value)
     return (string.format ("%.1f%%", value/2.55))
 end
-function addPercentage127 (valueObject, value)
+function formatPercentageOffset127 (valueObject, value)
     return (string.format ("%.1f%%", value/1.27))
 end
-function addPercentage100 (valueObject, value)
+function formatPercentageOffset100 (valueObject, value)
     return (string.format ("%.1f%%", value))
 end
-function addPercentage10 (valueObject, value)
+function formatPercentageOffset10 (valueObject, value)
     return (string.format ("%.1f%%", value/10))
 end
 -- scale by 32
-function times32(valueObject, value)
+function formatTimes32(valueObject, value)
     return (string.format ("%.1f units", (value/31)*32))
 end
 -- Add degrees sign
-function convertToPhase(valueObject, value)
+function formatPhase(valueObject, value)
     return (string.format ("%d degr.", value))
 end
 -- Add divide by 4
-function divide4(valueObject, value)
+function formatDivide4(valueObject, value)
     return (string.format ("%.1f", value/4))
 end
 -- Add semitones, scaled to 128 = 0
-function semitones128 (valueObject, value)
+function formatSemitones128 (valueObject, value)
     return (string.format ("%i semitones", value-128))
 end
 -- Add semitones, scaled to 64 = 0
-function semitones64 (valueObject, value)
+function formatSemitones64 (valueObject, value)
     return (string.format ("%i semitones", value-64))
 end
 -- Add semitones, divided by 8
-function semitones8 (valueObject, value)
+function formatSemitones8 (valueObject, value)
     return (string.format ("%.2f semitones", value/8))
 end
 -- Add semitones
-function semitones (valueObject, value)
+function formatSemitones (valueObject, value)
     return (string.format ("%d semitones", value))
 end
 -- Add cents 
-function cents (valueObject, value)
+function formatCents (valueObject, value)
     return (string.format ("%d cents", value))
 end
 -- atrophy parameter formats from sysex guide
-function trackOffset (valueObject, value)
+function formatTrackOffset (valueObject, value)
     return (string.format ("%d semitones", -value))
 end
-function toHertz1 (valueObject, value)
-  local x = (2^((value-255)/27.63083863))*60
-    return (string.format ("%.2f HZ", x))
+function formatFrequencyToHertz1 (valueObject, value)
+  local hertzValue = (2^((value-255)/27.63083863))*60
+    return (string.format ("%.2f HZ", hertzValue))
 end
-function toHertz2 (valueObject, value)
-  local x = (2^((value-69)/12))*440
-    return (string.format ("%.2f HZ", x))
+function formatFrequencyToHertz2 (valueObject, value)
+  local hertzValue = (2^((value-69)/12))*440
+    return (string.format ("%.2f HZ", hertzValue))
 end
-function centPOct1(valueObject,value)
-  local x = ((value-16)/32)*12.5
-    return (string.format ("%.2f c/Oct", x))
+function formatCentsPerOctave1(valueObject,value)
+  local centsPerOctave = ((value-16)/32)*12.5
+    return (string.format ("%.2f c/Oct", centsPerOctave))
 end
-function centPOct2(valueObject,value)
-  local x = (value/63)*12.5
-    return (string.format ("%.2f c/Oct", x))
+function formatCentsPerOctave2(valueObject,value)
+  local centsPerOctave = (value/63)*12.5
+    return (string.format ("%.2f c/Oct", centsPerOctave))
 end
-function centPOct3(valueObject,value)
-  local x = (value/63)*50
-    return (string.format ("%.2f c/Oct", x))
+function formatCentsPerOctave3(valueObject,value)
+  local centsPerOctave = (value/63)*50
+    return (string.format ("%.2f c/Oct", centsPerOctave))
 end
-function centPOct4(valueObject,value)
-  local x = ((value-32)/63)*100
-    return (string.format ("%.2f c/Oct", x))
+function formatCentsPerOctave4(valueObject,value)
+  local centsPerOctave = ((value-32)/63)*100
+    return (string.format ("%.2f c/Oct", centsPerOctave))
 end
-function driftSpeed(valueObject,value)
-  local x = (value/63)*61.5
-    return (string.format ("%.2f p/s", x))
+function formatDriftSpeed(valueObject,value)
+  local phaseSpeed = (value/63)*61.5
+    return (string.format ("%.2f p/s", phaseSpeed))
 end
-function oscDrift(valueObject,value)
-  local x = (value/63)*100
-    return (string.format ("%.2f c", x))
+function formatOscillatorDrift(valueObject,value)
+  local centsValue = (value/63)*100
+    return (string.format ("%.2f c", centsValue))
 end
-function filterDrift(valueObject,value)
-  local x = (value/63)*400
-    return (string.format ("%.2f c", x))
+function formatFilterDrift(valueObject,value)
+  local centsValue = (value/63)*400
+    return (string.format ("%.2f c", centsValue))
 end
-function twoPoleTrim(valueObject,value)
-  local x = ((value+257)/512)*100
-    return (string.format ("%.2f pct", x))
+function formatTwoPoleTrim(valueObject,value)
+  local percentageValue = ((value+257)/512)*100
+    return (string.format ("%.2f pct", percentageValue))
 end
-function fourPoleTrim(valueObject,value)
-  local x = ((value)/255)*100
-    return (string.format ("%.2f%%", x))
+function formatFourPoleTrim(valueObject,value)
+  local percentageValue = ((value)/255)*100
+    return (string.format ("%.2f%%", percentageValue))
 end
-function linear (valueObject, value)
-    local x = (value)/16
-    return (string.format ("%.2f%%", x))
+function formatLinear (valueObject, value)
+    local percentageValue = (value)/16
+    return (string.format ("%.2f%%", percentageValue))
 end
 
 -- HELP_TEXTS: keyed table for fast lookup in events.onPotTouchChange
@@ -645,7 +645,7 @@ local HELP_TEXTS = {
 
 local function showHelp(helpText)
   info.setText(helpText)
-  amountTicks = 0
+  tickCounter = 0
   timer.enable()
 end
 
@@ -657,9 +657,9 @@ end
 
 local function resetVirtualAndControl(paramId, ctrlId)
   parameterMap.set(deviceId, PT_VIRTUAL, paramId, 0)
-  local c = safeGet(ctrlId)
-  if c and type(c.setValue) == "function" then
-    pcall(function() c:setValue(0) end)
+  local control = safeGet(ctrlId)
+  if control and type(control.setValue) == "function" then
+    pcall(function() control:setValue(0) end)
   end
 end
 
@@ -690,14 +690,14 @@ function patchMode(valueObject, value)
   if visibilityMap[value] then
     if value == 0 then
       parameterMap.set(deviceId, PT_VIRTUAL, 10029, 0)
-      SD_FLAG = 0 -- split/double flag off
+      splitDoubleFlag = 0 -- split/double flag off
     end
     local config = visibilityMap[value]
     for _,id in ipairs(config.hide) do
-      local c = safeGet(id); if c then c:setVisible(false) end
+      local control = safeGet(id); if control then control:setVisible(false) end
     end
     for _,id in ipairs(config.show) do
-      local c = safeGet(id); if c then c:setVisible(true) end
+      local control = safeGet(id); if control then control:setVisible(true) end
     end
   end
   local TARGET_SLOT1 = 26
@@ -764,29 +764,29 @@ function displaySD(valueObject, value)
     return
   end
 
-  -- validate sdMatrix row exists
-  local row = sdMatrix[baseIndex]
+  -- validate splitDoubleMatrix row exists
+  local row = splitDoubleMatrix[baseIndex]
   if not row then return end
   -- read row fields once; +1 conversions and floor just in case values are floats
-  local up = math.floor((row[1] or 0) + 1)
-  local ub = math.floor((row[2] or 0) + 1)
-  local lp = math.floor((row[3] or 0) + 1)
-  local lb = math.floor((row[4] or 0) + 1)
+  local upperProgramNumber = math.floor((row[1] or 0) + 1)
+  local upperBankNumber = math.floor((row[2] or 0) + 1)
+  local lowerProgramNumber = math.floor((row[3] or 0) + 1)
+  local lowerBankNumber = math.floor((row[4] or 0) + 1)
   -- pick controls based on which half we're updating
   local isFirstHalf = baseIndex >= 1 and baseIndex < 37
   local ctrlUpper = isFirstHalf and CTRL_UPPER_NAME_SINGLE or CTRL_UPPER_NAME_DOUBLE
   local ctrlLower = isFirstHalf and CTRL_LOWER_NAME_SINGLE or CTRL_LOWER_NAME_DOUBLE
   -- set upper patch name if available
-  if nameBank and nameBank[ub] and nameBank[ub][up] then
-    local displayName = BANK_NAMES[ub] .. tostring(up) .. " " .. (nameBank[ub][up] or "")
+  if patchNameBank and patchNameBank[upperBankNumber] and patchNameBank[upperBankNumber][upperProgramNumber] then
+    local displayName = BANK_NAMES[upperBankNumber] .. tostring(upperProgramNumber) .. " " .. (patchNameBank[upperBankNumber][upperProgramNumber] or "")
     controls.get(ctrlUpper):setName(displayName)
   end
   -- set lower patch name if available
-  if nameBank and nameBank[lb] and nameBank[lb][lp] then
-    controls.get(ctrlLower):setName(BANK_NAMES[lb]..lp.." "..nameBank[lb][lp])
+  if patchNameBank and patchNameBank[lowerBankNumber] and patchNameBank[lowerBankNumber][lowerProgramNumber] then
+    controls.get(ctrlLower):setName(BANK_NAMES[lowerBankNumber]..lowerProgramNumber.." "..patchNameBank[lowerBankNumber][lowerProgramNumber])
   end
   -- parameter mappings (unified table: {targetParam, srcIndex, multiplier})
-  local param_map = {
+  local parameterMappings = {
     {130, 8, 64},   -- Performance pitch bend range (/64)
     {131, 9, 64},   -- Performance octave pitch transpose (/64)
     {134, 10, 64},  -- Performance LFO depth (/64)
@@ -794,82 +794,82 @@ function displaySD(valueObject, value)
     {1280, 6, 1},   -- Performance keyboard split point
     {133, 12, 1},   -- Performance LFO shape
   }
-  for _, m in ipairs(param_map) do
-    local srcVal = row[m[2]] or 0
-    parameterMap.set(deviceId, PT_NRPN, m[1], srcVal * m[3])
+  for _, mapping in ipairs(parameterMappings) do
+    local sourceValue = row[mapping[2]] or 0
+    parameterMap.set(deviceId, PT_NRPN, mapping[1], sourceValue * mapping[3])
   end
   -- pset mappings (keeps original grouping)
-  local pset_mappings = {
+  local presetMappings = {
     {{115,117,118,119}, row[5]},           -- Performance LFO mods
     {{8,10,19,97,103,109}, row[7]},        -- Performance panel settings
   }
-  for _, m in ipairs(pset_mappings) do
-    pset(m[1], m[2])
+  for _, mapping in ipairs(presetMappings) do
+    pset(mapping[1], mapping[2])
   end
 end
 
 -- panning control parameter
 function setPanType(valueObject, type)
   if type == nil then return end
-  local widthControl = math.min(parameterMap.get(deviceId, PT_VIRTUAL,201),100)
-  local paramList = {
+  local panWidthControl = math.min(parameterMap.get(deviceId, PT_VIRTUAL,201),100)
+  local parameterList = {
     2176,2177,2178,2179,2180,2181,2182,2183,
     2184,2185,2186,2187,2188,2189,2190,2191
   }
   local value = 0
   local steps = {0, 85, 170, 255}
-  for i, param in ipairs(paramList) do  
+  for i, param in ipairs(parameterList) do  
     if     type == 0 then value = 128 --  center all (128);
     elseif type == 1 then value = (i % 2 == 1) and 0 or 255 -- alternate left/right: odd indices -> 0, even indices -> 255   
     elseif type == 2 then value = steps[((i - 1) % 4) + 1] -- four-step pan groups: 0, 64, 192, 255 repeating every 4 voices
     else value = math.random(0, 255) -- random 
     end    
-    parameterMap.set(deviceId, PT_NRPN, param, math.floor(128+(value-128)*widthControl/100))
-    panDefValue[i]=value
+    parameterMap.set(deviceId, PT_NRPN, param, math.floor(128+(value-128)*panWidthControl/100))
+    panDefaultValues[i]=value
   end  
 end 
 
 function setPanWidth(valueObject, value)
-  local widthControl = parameterMap.get(deviceId, PT_VIRTUAL,201)
-  local paramList = {
+  local panWidthControl = parameterMap.get(deviceId, PT_VIRTUAL,201)
+  local parameterList = {
     2176,2177,2178,2179,2180,2181,2182,2183,
     2184,2185,2186,2187,2188,2189,2190,2191
   }
-  for i, param in ipairs(paramList) do
-    --print ("i : "..i..", param;"..param.." panDefValue[i]: "..panDefValue[i].." widthControl: "..widthControl)
-    parameterMap.set(deviceId, PT_NRPN, param, math.max(math.min(math.floor(128+(panDefValue[i]-128)*widthControl/100),255),0))   
+  for i, param in ipairs(parameterList) do
+    --print ("i : "..i..", param;"..param.." panDefaultValues[i]: "..panDefaultValues[i].." panWidthControl: "..panWidthControl)
+    parameterMap.set(deviceId, PT_NRPN, param, math.max(math.min(math.floor(128+(panDefaultValues[i]-128)*panWidthControl/100),255),0))   
   end
 end
 
 function setPanDefault(valueObject, value)
   local parameterNumber = valueObject:getMessage ():getParameterNumber ()
-  panDefValue[parameterNumber+1-2176] = value+128
+  panDefaultValues[parameterNumber+1-2176] = value+128
 end
 
 -- bitmask helper function ---
-function sendBitmask(paramNumber, deviceId, paramList)
+function sendBitmask(paramNumber, deviceId, parameterList)
   local value = 0
-  for i,p in ipairs(paramList) do
+  for i,p in ipairs(parameterList) do
     if p and parameterMap.get(deviceId, PT_VIRTUAL, p) ~= 0 then
       value = value + (1 << (i-1))
     end
   end
-  local pMSB = (paramNumber >> 7) & 0x7F
-  local pLSB = paramNumber & 0x7F
-  local vMSB = (value >> 7) & 0x7F
-  local vLSB = value & 0x7F
---print("pMSB "..pMSB.." pLSB " ..pLSB.. " vMSB "..vMSB.." vLSB ".. vLSB)
-  midi.sendControlChange(currentPort, currentChannel, 99, pMSB)
-  midi.sendControlChange(currentPort, currentChannel, 98, pLSB)
-  midi.sendControlChange(currentPort, currentChannel, 6, vMSB)
-  midi.sendControlChange(currentPort, currentChannel, 38, vLSB)
+  local parameterMSB = (paramNumber >> 7) & 0x7F
+  local parameterLSB = paramNumber & 0x7F
+  local valueMSB = (value >> 7) & 0x7F
+  local valueLSB = value & 0x7F
+--print("parameterMSB "..parameterMSB.." parameterLSB " ..parameterLSB.. " valueMSB "..valueMSB.." valueLSB ".. valueLSB)
+  midi.sendControlChange(currentPort, currentChannel, 99, parameterMSB)
+  midi.sendControlChange(currentPort, currentChannel, 98, parameterLSB)
+  midi.sendControlChange(currentPort, currentChannel, 6, valueMSB)
+  midi.sendControlChange(currentPort, currentChannel, 38, valueLSB)
 end
 
-function bitMask007(valueObject,value) -- NRPN 0/7 = 7 ControlPortamentoSettings 
+function sendControlPortamentoSettingsMask(valueObject,value) -- NRPN 0/7 = 7 ControlPortamentoSettings 
 -- Bitmask: Match (0001) Quantize (0010) Bend (0100) Exponential (1000)
   sendBitmask(7, deviceId, {54,60,59,65})
 end
-function bitMask101(valueObject,value) -- NRPN 1/1 = 129 PerformanceSettings 
+function sendPerformanceSettingsMask(valueObject,value) -- NRPN 1/1 = 129 PerformanceSettings 
 -- Bitmask: Bend Osc2 only~Bend Osc1&Osc2 (000001) Custombend~Bend +/-2 (000010) OSC1 (000100) OSC2 (001000) Upper (010000) Lower (100000)
   sendBitmask(129, deviceId, {8,10,19,97,103,109}) 
   local bendType = parameterMap.get(deviceId, PT_VIRTUAL, 10)
@@ -879,47 +879,47 @@ function bitMask101(valueObject,value) -- NRPN 1/1 = 129 PerformanceSettings
     controls.get (110):setVisible (true)
   end
 end
-function bitMask107(valueObject,value) -- NRPN 1/7 = 135 PerformanceLFOMods 
+function sendPerformanceLfoModsMask(valueObject,value) -- NRPN 1/7 = 135 PerformanceLFOMods 
 -- Bitmask: Track (0001) Envelope (0010) TempoLock (0100) LFOTrig (1000)
   sendBitmask(135, deviceId, {117,118,119}) 
 end
-function bitMask205(valueObject,value) -- NRPN 2/5 = 261 ModulationLFOMods 
+function sendModulationLfoModsMask(valueObject,value) -- NRPN 2/5 = 261 ModulationLFOMods 
 -- Bitmask: LFO Track on~LFO Track off (0001) LFOEnv2 Rate on~LFOEnv2 Rate off (0010) TempoLock (0100) LFOTrig (1000)
   sendBitmask(261, deviceId, {37,38,39,40}) 
 end
-function bitMask207(valueObject,value) -- NRPN 2/7 = 263 ModulationChannel1Sends 
+function sendModulationChannel1SendsMask(valueObject,value) -- NRPN 2/7 = 263 ModulationChannel1Sends 
 -- Bitmask: C1 OSC1 LFO on~C1 OSC1 LFO off (001) C1 OSC2 LFO on~C1 OSC2 LFO off (010) C1 Flt LFO on~C1 Flt LFO off (100)
   sendBitmask(263, deviceId, {50,51,27}) 
 end
-function bitMask208(valueObject,value) -- NRPN 2/8 = 264 ModulationChannel1Mods 
+function sendModulationChannel1ModsMask(valueObject,value) -- NRPN 2/8 = 264 ModulationChannel1Mods 
 -- Bitmask: C1 Quant on~C1 Quant off (01) LFOEnv1 Inv on~LFOEnv1 Inv off (10)
   sendBitmask(264, deviceId, {30,31}) 
 end
-function bitMask209(valueObject,value) -- NRPN 2/9 = 265 ModulationChannel2Sends 
+function sendModulationChannel2SendsMask(valueObject,value) -- NRPN 2/9 = 265 ModulationChannel2Sends 
 -- Bitmask: C2 PWM1 LFO on~C2 PWM1 LFO off (001) C2 PWM2 LFO on~C2 PWM2 LFO off (010) C2 Vol LFO on~C2 Vol LFO off (100)
   sendBitmask(265, deviceId, {33,35,44}) 
 end
-function bitMask210(valueObject,value) -- NRPN 2/10 = 266 ModulationChannel2Mods 
+function sendModulationChannel2ModsMask(valueObject,value) -- NRPN 2/10 = 266 ModulationChannel2Mods 
 -- Bitmask: C2 Quant on~C2 Quant off (01) LFOEnv2 Inv on~LFOEnv2 Inv off (10)
   sendBitmask(266, deviceId, {49,46}) 
 end
-function bitMask313(valueObject,value) -- NRPN 3/13 = 397 EnvelopesFilterMods 
+function sendEnvelopesFilterModsMask(valueObject,value) -- NRPN 3/13 = 397 EnvelopesFilterMods 
 -- Bitmask: Flip (00001) Repeat (00010) Retrig (00100) Loop (01000) Legato (10000)
   sendBitmask(397, deviceId, {136,137,138,139,140}) 
 end
-function bitMask314(valueObject,value) -- NRPN 3/14 = 398 EnvelopesLoudnessMods 
+function sendEnvelopesLoudnessModsMask(valueObject,value) -- NRPN 3/14 = 398 EnvelopesLoudnessMods 
 -- Bitmask: Flip (00001) Repeat (00010) Retrig (00100) Loop (01000) Legato (10000)
   sendBitmask(398, deviceId, {141,142,143,144,145}) 
 end
-function bitMask404(valueObject,value) -- NRPN 4/4 = 516 ModulationChannel1Mods 
+function sendOscillatorModulationChannel1ModsMask(valueObject,value) -- NRPN 4/4 = 516 ModulationChannel1Mods 
 -- Bitmask: OSC2 sync on~OSC2 sync off (01) OSC2 f-env on~OSC2 f-env off (10)
   sendBitmask(516, deviceId, {2,9}) 
 end
-function bitMask405(valueObject,value) -- NRPN 4/5 = 517 OscillatorsOSC1State
+function sendOscillator1StateMask(valueObject,value) -- NRPN 4/5 = 517 OscillatorsOSC1State
 -- Bitmask: OSC1 full~OSC1 off (001) OSC1 VCO LFO 180~OSC1 VCO LFO 0 (010) OSC1 PWM LFO 180~OSC1 PWM LFO 0 (100)
   sendBitmask(517, deviceId, {3,154,155}) 
 end
-function bitMask504(valueObject,value) -- NRPN 5/4 = 644 FilterModes 
+function sendFilterModesMask(valueObject,value) -- NRPN 5/4 = 644 FilterModes 
 -- Bitmask: Filter track on~Filter track off (01) 4 pole filter~2 pole filter (10)
   sendBitmask(644, deviceId, {76,89}) 
 end
@@ -949,19 +949,19 @@ function selectIt(valueObject, value)
   local mode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
   local part = parameterMap.get(deviceId, PT_VIRTUAL, 10029)
   if mode > 0 and part == 0 then
-    sdMatrix[1][1] = progNum
-    sdMatrix[1][2] = bankLSB
-    sdMatrix[37][1] = progNum
-    sdMatrix[37][2] = bankLSB
+    splitDoubleMatrix[1][1] = progNum
+    splitDoubleMatrix[1][2] = bankLSB
+    splitDoubleMatrix[37][1] = progNum
+    splitDoubleMatrix[37][2] = bankLSB
   elseif mode > 0 and part == 1 then
-    sdMatrix[1][3] = progNum
-    sdMatrix[1][4] = bankLSB
-    sdMatrix[37][3] = progNum
-    sdMatrix[37][4] = bankLSB
+    splitDoubleMatrix[1][3] = progNum
+    splitDoubleMatrix[1][4] = bankLSB
+    splitDoubleMatrix[37][3] = progNum
+    splitDoubleMatrix[37][4] = bankLSB
   end
   -- Force a UI refresh for the updated slots:
-  displaySD(nil, 0)   -- redraw slot 1 (sdMatrix[1])
-  displaySD(nil, 36)  -- redraw slot 37 (sdMatrix[37])
+  displaySD(nil, 0)   -- redraw slot 1 (splitDoubleMatrix[1])
+  displaySD(nil, 36)  -- redraw slot 37 (splitDoubleMatrix[37])
 end
 
 function selectSD(valueObject, value)
@@ -977,20 +977,20 @@ function selectSD(valueObject, value)
   elseif mode == 2 then  
     v = parameterMap.get (deviceId, PT_VIRTUAL, 10023) + 1 -- only can load 35 stored splits
   end
-  local bankLSB = {sdMatrix[v][2],sdMatrix[v][4]}
-  local progNum = {sdMatrix[v][1],sdMatrix[v][3]}
-  print (string.format("selecting upper patch: Bank = %d, Prog = %d, Channel = %d", bankLSB[1], progNum[1], ubxaUpperCh))
-  midi.sendControlChange(currentPort , ubxaUpperCh , 32, bankLSB[1])
-  midi.sendProgramChange(currentPort , ubxaUpperCh , progNum[1])
-  print (string.format("selecting lower patch: Bank = %d, Prog = %d, Channel = %d", bankLSB[2], progNum[2], ubxaLowerCh))
-  midi.sendControlChange(currentPort , ubxaLowerCh , 32, bankLSB[2])
-  midi.sendProgramChange(currentPort , ubxaLowerCh , progNum[2])
+  local bankLSB = {splitDoubleMatrix[v][2],splitDoubleMatrix[v][4]}
+  local progNum = {splitDoubleMatrix[v][1],splitDoubleMatrix[v][3]}
+  print (string.format("selecting upper patch: Bank = %d, Prog = %d, Channel = %d", bankLSB[1], progNum[1], synthUpperChannel))
+  midi.sendControlChange(currentPort , synthUpperChannel , 32, bankLSB[1])
+  midi.sendProgramChange(currentPort , synthUpperChannel , progNum[1])
+  print (string.format("selecting lower patch: Bank = %d, Prog = %d, Channel = %d", bankLSB[2], progNum[2], synthLowerChannel))
+  midi.sendControlChange(currentPort , synthLowerChannel , 32, bankLSB[2])
+  midi.sendProgramChange(currentPort , synthLowerChannel , progNum[2])
 end
 
 function displayPatch (valueObject, value)
   local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
-  controls.get (209):setName(nameBank[bankNum][value])  -- display loaded patch names stored in nameBank
+  controls.get (209):setName(patchNameBank[bankNum][value])  -- display loaded patch names stored in patchNameBank
   return (string.format(bankTxt[bankNum]).." "..string.format("%03d",value))
 end
 
@@ -1111,7 +1111,7 @@ end
 -- Input: array of bytes indexed 1..n (Lua-style). The PHP code processes groups of 8 bytes:
 --   msb byte followed by 7 bytes; bits in msb say whether to set top-bit (0x80) on corresponding byte.
 -- Output: array of full bytes (1..m).
-function unpack_midi(array)
+function unpackMidi(array)
   local result = {}
   local i = 1
   while i <= #array do
@@ -1131,13 +1131,13 @@ function unpack_midi(array)
   return result
 end
 -- Parse a sequence of "messages" (each message is a numeric byte array, 1..n).
--- Mirrors the PHP parse_sysex behavior:
+-- Mirrors the PHP parseSysex behavior:
 --  - message byte at PHP index 10 indicates type: 1 = header, 2 = data packet
 --  - header message: reads type (4 chars), length (4x7bit little-endian), name (16 chars)
---  - data packet: packet_num (msg[11]), packet_len (msg[12]), then payload starting at msg[13]
+--  - data packet: packetNumber (msg[11]), packetLength (msg[12]), then payload starting at msg[13]
 --  - end condition: PHP msg[3] == 0x7B
 -- Returns: header table { name=..., length=..., type=..., data={...} } or nil if not found
-function parse_sysex(messages)
+function parseSysex(messages)
   local header = nil
   for _, msg in ipairs(messages) do
     -- header message marker: PHP msg[10] -> Lua get(msg,10)
@@ -1172,24 +1172,24 @@ function parse_sysex(messages)
       for i = 1, length do header.data[i] = 0 end
     -- data packet: PHP msg[10] == 2
     elseif get(msg, 10) == 2 and header ~= nil then
-      local packet_num = get(msg, 11) or 0
-      local packet_len = get(msg, 12) or 0
-      -- PHP: $data = array_slice($msg, 13, $packet_len + 1)
-      -- packet data are PHP indices 13 .. 13+packet_len (0-based)
+      local packetNumber = get(msg, 11) or 0
+      local packetLength = get(msg, 12) or 0
+      -- PHP: $data = array_slice($msg, 13, $packetLength + 1)
+      -- packet data are PHP indices 13 .. 13+packetLength (0-based)
       local data = {}
-      for k = 0, packet_len do
+      for k = 0, packetLength do
         data[#data + 1] = get(msg, 13 + k) or 0
       end
-      -- PHP array_splice(.., $packet_num * 128, $packet_len + 1, $data)
-      -- so destination start is PHP index (packet_num * 128) -> Lua index +1
-      local dest_start = packet_num * 128 + 1
+      -- PHP array_splice(.., $packetNumber * 128, $packetLength + 1, $data)
+      -- so destination start is PHP index (packetNumber * 128) -> Lua index +1
+      local destinationStart = packetNumber * 128 + 1
       for k = 1, #data do
-        header.data[dest_start + k - 1] = data[k]
+        header.data[destinationStart + k - 1] = data[k]
       end
     -- end marker: PHP msg[3] == 0x7B
     elseif get(msg, 3) == 0x7B and header ~= nil then
       -- unpack the 7bit-packed MIDI data
-      header.data = unpack_midi(header.data)
+      header.data = unpackMidi(header.data)
       -- trim to header.length (PHP array_slice(..., 0, $header['length']))
       local trimmed = {}
       for i = 1, math.min(#header.data, header.length) do
@@ -1202,10 +1202,10 @@ function parse_sysex(messages)
   return nil
 end
 
--- helper function for get_patch_name
+-- helper function for getPatchName
 local function trim(s) return s:match("^%s*(.-)%s*$") end
 
-function get_patch_name(data,startIdx)
+function getPatchName(data,startIdx)
   if type(data) ~= "table" then return "" end
   local nameChars = {}
   for i = startIdx, startIdx + 15, 2 do
@@ -1222,7 +1222,7 @@ function get_patch_name(data,startIdx)
   return trim(table.concat(nameChars))
 end
 
-function get_atrophy_name(data,startIdx)
+function getAtrophyName(data,startIdx)
   if type(data) ~= "table" then return "" end
   local nameChars = {}
   for i = startIdx, startIdx + 5 do
@@ -1237,18 +1237,18 @@ end
 
 -- helper function to parse an x bit bitmask to a virtual parameter with values 0..2^x-1
 function pset(params, value)
-  local x = #params
-  local v = math.floor(tonumber(value) or 0) & (2^x - 1)
+  local bitCount = #params
+  local bitmaskedValue = math.floor(tonumber(value) or 0) & (2^bitCount - 1)
   for i, p in ipairs(params) do
     if p ~= nil then
-      local bit = (v >> (i - 1)) & 1
+      local bit = (bitmaskedValue >> (i - 1)) & 1
       parameterMap.set(deviceId, PT_VIRTUAL, p, bit) -- sets 1 or 0
     end
   end
 end
 
 -- helper functions and globals for midi.onSysex 
-local sysex_states = {}
+local sysexStates = {}
 local VENDOR_ID = {0x00, 0x20, 0x32} -- Behringer
 local HEADER_MSG_TYPE = 1
 local PACKET_MSG_TYPE = 2
@@ -1278,30 +1278,30 @@ local HANDLERS = {
   currentProgram = { endMsgNum = 16, handlerName = "currentProgram" },
 }
 
-local function safe_peek(sysexBlock, length, i)
+local function safePeek(sysexBlock, length, i)
   if type(i) ~= "number" or i < 1 or i > length then return nil end
   return sysexBlock:peek(i)
 end
 
-local function peek_string(sysexBlock, length, startIndex, count)
+local function peekString(sysexBlock, length, startIndex, count)
   if startIndex < 1 or count < 1 then return "" end
   local t = {}
   for j = 0, count - 1 do
-    local b = safe_peek(sysexBlock, length, startIndex + j)
+    local b = safePeek(sysexBlock, length, startIndex + j)
     if not b then break end
     t[#t+1] = string.char(b)
   end
   return table.concat(t)
 end
 
-local function is_vendor_match(sysexBlock, length)
-  return safe_peek(sysexBlock, length, 2) == VENDOR_ID[1]
-     and safe_peek(sysexBlock, length, 3) == VENDOR_ID[2]
-     and safe_peek(sysexBlock, length, 4) == VENDOR_ID[3]
+local function isVendorMatch(sysexBlock, length)
+  return safePeek(sysexBlock, length, 2) == VENDOR_ID[1]
+     and safePeek(sysexBlock, length, 3) == VENDOR_ID[2]
+     and safePeek(sysexBlock, length, 4) == VENDOR_ID[3]
 end
 
-local function detect_dump_type(sysexBlock, length)
-  local hdrText = peek_string(sysexBlock, length, 21, 16):lower()
+local function detectDumpType(sysexBlock, length)
+  local hdrText = peekString(sysexBlock, length, 21, 16):lower()
   
   if hdrText:find("upper patch", 1, true) then
     return DUMP_TYPES.UPPER_PATCH
@@ -1323,17 +1323,17 @@ local function detect_dump_type(sysexBlock, length)
   return nil
 end
 
-local function reset_state_for_iface(iface)
-  sysex_states[iface] = {
+local function resetStateForInterface(iface)
+  sysexStates[iface] = {
     msgNumber = 0,
     section = 0,
     dump = {},
     dumpType = nil,
-    last_ts = nil
+    lastTimestamp = nil
   }
 end
 
-local function call_handler(dumpType, dump)
+local function callHandler(dumpType, dump)
   local handlerInfo = HANDLERS[dumpType]
   if not handlerInfo then return end
   local fn = _G[handlerInfo.handlerName]
@@ -1344,7 +1344,7 @@ local function call_handler(dumpType, dump)
   end
 end
 
-local function log_sysex(msgNumber, iface, length, sysexBlock)
+local function logSysex(msgNumber, iface, length, sysexBlock)
   print(string.format("sysex (msg=%d) message received: interface=%s length=%d",
     msgNumber, iface, length))
   for startIndex = 1, length, 24 do
@@ -1358,7 +1358,7 @@ local function log_sysex(msgNumber, iface, length, sysexBlock)
   end
 end
 
-local function collect_dump(sysexBlock, length)
+local function collectDump(sysexBlock, length)
   local temp = {}
   for i = 1, length do
     local b = sysexBlock:peek(i)
@@ -1372,10 +1372,10 @@ function midi.onSysex(midiInput, sysexBlock)
   local ok, err = pcall(function()
     local length = sysexBlock:getLength()
     local iface = tostring(midiInput.interface or midiInput.name or "unknown")
-    local state = sysex_states[iface]
+    local state = sysexStates[iface]
     if not state then
-      reset_state_for_iface(iface)
-      state = sysex_states[iface]
+      resetStateForInterface(iface)
+      state = sysexStates[iface]
     end
     -- Reset state if starting a new transfer
     if state.msgNumber == 0 then
@@ -1384,29 +1384,29 @@ function midi.onSysex(midiInput, sysexBlock)
       state.dumpType = nil
     end
     -- HEADER detection
-    if length > 6 and safe_peek(sysexBlock, length, 11) == HEADER_MSG_TYPE then
-      local expected_header_msgnum = 1 + (state.section or 0) * 2
-      if state.msgNumber ~= 0 and state.msgNumber ~= expected_header_msgnum then
+    if length > 6 and safePeek(sysexBlock, length, 11) == HEADER_MSG_TYPE then
+      local expectedHeaderMessageNumber = 1 + (state.section or 0) * 2
+      if state.msgNumber ~= 0 and state.msgNumber ~= expectedHeaderMessageNumber then
         print("onSysex: unexpected header while msgNumber=" .. tostring(state.msgNumber) .. "; resetting state and starting new transfer")
-        reset_state_for_iface(iface)
-        state = sysex_states[iface]
+        resetStateForInterface(iface)
+        state = sysexStates[iface]
       end
       if state.msgNumber == 0 then
         -- Start of first header: validate vendor and model
         state.section = 0
         state.msgNumber = 1
-        if not is_vendor_match(sysexBlock, length) then
+        if not isVendorMatch(sysexBlock, length) then
           print("onSysex: Not Behringer vendor; ignoring message")
-          reset_state_for_iface(iface)
+          resetStateForInterface(iface)
           return
         end
-        if safe_peek(sysexBlock, length, 7) ~= MODEL_BYTE then
+        if safePeek(sysexBlock, length, 7) ~= MODEL_BYTE then
           print("onSysex: Not UB-Xa model; ignoring message")
-          reset_state_for_iface(iface)
+          resetStateForInterface(iface)
           return
         end
         -- Detect dump type from header text (only on first header)
-        state.dumpType = detect_dump_type(sysexBlock, length)
+        state.dumpType = detectDumpType(sysexBlock, length)
       else
         -- Additional header: advance section
         state.section = (state.section or 0) + 1
@@ -1416,24 +1416,24 @@ function midi.onSysex(midiInput, sysexBlock)
     end
 
     -- PACKET detection: simplified to single peek
-    if length > 6 and safe_peek(sysexBlock, length, 11) == PACKET_MSG_TYPE then
-      local packetNum = safe_peek(sysexBlock, length, 12)
+    if length > 6 and safePeek(sysexBlock, length, 11) == PACKET_MSG_TYPE then
+      local packetNum = safePeek(sysexBlock, length, 12)
       if packetNum and packetNum >= 0 and packetNum <= 76 then
         state.msgNumber = packetNum + 2 + (state.section or 0) * 2
       end
     end
-    table.insert(state.dump, collect_dump(sysexBlock, length))
+    table.insert(state.dump, collectDump(sysexBlock, length))
 
     -- Logging (optional)
---    log_sysex(state.msgNumber, iface, length, sysexBlock)
+--    logSysex(state.msgNumber, iface, length, sysexBlock)
     -- Collect message into dump
 
     -- Call handler on EOF if applicable
     if state.dumpType then
       local handlerInfo = HANDLERS[state.dumpType]
       if handlerInfo and state.msgNumber == handlerInfo.endMsgNum then
-        call_handler(state.dumpType, state.dump)
-        reset_state_for_iface(iface)
+        callHandler(state.dumpType, state.dump)
+        resetStateForInterface(iface)
         return
       end
     end
@@ -1449,7 +1449,7 @@ end
 -- need to finish performance/panel settings parameters
 function patch(dump)
   -- parse of the incoming dump
-  local result = parse_sysex(dump)
+  local result = parseSysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
     return
@@ -1466,10 +1466,10 @@ function patch(dump)
 
   -- Assign the 39 2-byte parameters. Multiple 0-255 range parameters by 64 to scale to the 0-16383 (14-bit) range of nrpn
   -- The result doesn't always exactly match the UB-Xa because the range of a 2-byte parameter is actually 0-65535 (16-bit)
-  local paramList = {0,1,2,3,128,256,257,258,259,260,384,385,386,387,388,389,390,391,392,393,394,395,396,
+  local parameterList = {0,1,2,3,128,256,257,258,259,260,384,385,386,387,388,389,390,391,392,393,394,395,396,
                   512,513,514,515,640,641,642,643,768,770,772,774,769,771,773,775}
   for i = 1,39 do
-    parameterMap.updateValue (deviceId, PT_NRPN, paramList[i], param2[i]*64) 
+    parameterMap.updateValue (deviceId, PT_NRPN, parameterList[i], param2[i]*64) 
   end
   -- Assign remaining patch parameters. Some are bitmasked and treated separately. Some PLFO settings are 2-byte
   local mappings = {
@@ -1573,8 +1573,8 @@ function patch(dump)
     {2309, 739},  -- Atrophy profile name character 6
   }
   -- Batch assign parameters
-  for _, m in ipairs(mappings) do
-    parameterMap.updateValue (deviceId, PT_NRPN, m[1], data[m[2]])
+  for _, mapping in ipairs(mappings) do
+    parameterMap.updateValue (deviceId, PT_NRPN, mapping[1], data[mapping[2]])
   end
   -- Assign bit masked groups
   local mappings = {
@@ -1589,8 +1589,8 @@ function patch(dump)
     {{3,154,155}, 111},                  -- 517 Osc1 state
     {{76,89}, 121},                      -- 644 Filter key track and mode
   }
-  for _, m in ipairs(mappings) do
-    pset(m[1],data[m[2]])
+  for _, mapping in ipairs(mappings) do
+    pset(mapping[1],data[mapping[2]])
   end
   -- Assign upper patch ARP and sequencer parameters to upper device
   local mappings = {
@@ -1606,12 +1606,12 @@ function patch(dump)
     {2434, 670},  -- seq gate length
     {2435, 671},  -- seq sync
   }
-  for _, m in ipairs(mappings) do
-    parameterMap.updateValue(deviceId, PT_NRPN, m[1], data[m[2]])
+  for _, mapping in ipairs(mappings) do
+    parameterMap.updateValue(deviceId, PT_NRPN, mapping[1], data[mapping[2]])
   end
   -- use patch performance parameters unless using split-double 
-  print("SD_FLAG = ".. SD_FLAG)
-  if SD_FLAG == 0 then
+  print("splitDoubleFlag = ".. splitDoubleFlag)
+  if splitDoubleFlag == 0 then
     -- 2 byte performance parameters
     local mappings = {
       {130, 677},  -- Performance pitch bend range (/64)
@@ -1619,28 +1619,28 @@ function patch(dump)
       {132, 681},  -- Performance LFO rate (/64)
       {134, 680},  -- Performance LFO depth (/64) ??
     }
-    for _, m in ipairs(mappings) do
-      parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]]*64)
+    for _, mapping in ipairs(mappings) do
+      parameterMap.set(deviceId, PT_NRPN, mapping[1], data[mapping[2]]*64)
     end
     -- 1 byte performance parameters
     local mappings = {
       {1280, 673},  -- Performance keyboard split point
       {133, 682},  -- Performance LFO shape
     }
-    for _, m in ipairs(mappings) do
-      parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]])
+    for _, mapping in ipairs(mappings) do
+      parameterMap.set(deviceId, PT_NRPN, mapping[1], data[mapping[2]])
     end
     -- bit masked performance parameters
     local mappings = {
       {{115,117,118,119}, 672},            -- 135 Performance LFO mods
       {{8,10,19,97,103,109}, 674},         -- 129 Performance panel settings
     }
-    for _, m in ipairs(mappings) do
-      pset(m[1],data[m[2]])
+    for _, mapping in ipairs(mappings) do
+      pset(mapping[1],data[mapping[2]])
     end
   end
 
-  patchName = get_patch_name(data,79) -- update patchName (starts at byte 79 of data)
+  patchName = getPatchName(data,79) -- update patchName (starts at byte 79 of data)
   local part = parameterMap.get(deviceId, PT_VIRTUAL, 10029)
   if part == 0 then
     patchName = "U "..patchName
@@ -1649,7 +1649,7 @@ function patch(dump)
   end
   info.setText(patchName)
   print("Patch name: ".. patchName)
-  local atrophyName = get_atrophy_name(data,734) -- name of the patch atrophy profile (starts at byte 734 of data)
+  local atrophyName = getAtrophyName(data,734) -- name of the patch atrophy profile (starts at byte 734 of data)
   controls.get (426):setName(atrophyName)  -- display current atrophy profile name
   print("Patch Atrophy name: ".. atrophyName)
   print("Patch settings parsed. Number of bytes: ".. #data.. " on MIDI channel: "..currentChannel)
@@ -1658,7 +1658,7 @@ end
 -- for a global atrophy profile dump
 function atrophy(dump)
   -- parse of the incoming dump
-  local result = parse_sysex(dump)
+  local result = parseSysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
     return
@@ -1730,7 +1730,7 @@ function atrophy(dump)
     parameterMap.updateValue (deviceId, PT_NRPN, p[1], data[p[2]])
   end
   print("atrophy settings parsed. Number of bytes: ".. #data)
-  local atrophyName = get_atrophy_name(data,49) -- name of selected atrophy profile
+  local atrophyName = getAtrophyName(data,49) -- name of selected atrophy profile
   print("Atrophy profile name: ".. atrophyName)
   controls.get (426):setName(atrophyName)  -- display current atrophy profile name
   return (data)
@@ -1739,7 +1739,7 @@ end
 -- for a global settings dump
 function global(dump)
   -- parse of the incoming dump
-  local result = parse_sysex(dump)
+  local result = parseSysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
     return
@@ -1818,23 +1818,23 @@ function global(dump)
   -- UB-Xa gives 0..15 so add 1
   local rawUpper = parameterMap.get(deviceId, PT_NONE, 1159) + 1
   local rawLower = parameterMap.get(deviceId, PT_NONE, 1160) + 1
-  ubxaUpperCh = normalizeChannel(rawUpper)  -- with CHANNEL_BASE=0
-  ubxaLowerCh = normalizeChannel(rawLower)
+  synthUpperChannel = normalizeChannel(rawUpper)  -- with CHANNEL_BASE=0
+  synthLowerChannel = normalizeChannel(rawLower)
   -- Mirror into the UI devices
-  if ubxaUpperCh ~= nil then upperDevice:setChannel(ubxaUpperCh) end
-  if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
+  if synthUpperChannel ~= nil then upperDevice:setChannel(synthUpperChannel) end
+  if synthLowerChannel ~= nil then lowerDevice:setChannel(synthLowerChannel) end
   -- Re-apply to current device based on part selector
   applySynthChannels()         -- should set currentDevice channel
   refreshCurrentDeviceSnapshot()
   print(string.format("UBXA raw U/L=%s/%s -> Electra U/L=%s/%s",
-  tostring(rawUpper), tostring(rawLower), tostring(ubxaUpperCh), tostring(ubxaLowerCh)))
+  tostring(rawUpper), tostring(rawLower), tostring(synthUpperChannel), tostring(synthLowerChannel)))
   print("global settings parsed. Number of bytes: ".. #data)
 end
 
 -- process a split double dump
 function splitDouble(dump)
   -- parse of the incoming dump
-  local result = parse_sysex(dump)
+  local result = parseSysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
     return
@@ -1852,23 +1852,23 @@ function splitDouble(dump)
   end
   local rows, cols = 72, 18
   local idx = {1,2,3,4,5,6,7,10,12,13,14,15} -- 12 columns to extract
-  sdMatrix = {}
-  for r = 1, rows do
-    sdMatrix[r] = {}
-    local base = (r - 1) * cols
+  splitDoubleMatrix = {}
+  for rowIndex = 1, rows do
+    splitDoubleMatrix[rowIndex] = {}
+    local base = (rowIndex - 1) * cols
     for i = 1, #idx do
-      sdMatrix[r][i] = data[base + idx[i]]
+      splitDoubleMatrix[rowIndex][i] = data[base + idx[i]]
     end
   end
 --[[
   -- for debugging
   for i = 1, 72 do
-    local row_str = ""
+    local rowString = ""
     for j = 1, 12 do
         -- Format each number with 2 decimal places and a width of 6 spaces
-        row_str = row_str .. string.format("%4.0f ", sdMatrix[i][j])
+        rowString = rowString .. string.format("%4.0f ", splitDoubleMatrix[i][j])
     end
-    print(row_str)
+    print(rowString)
   end
 ]]
   print("split double settings parsed. Number of bytes: ".. #data)
@@ -1877,7 +1877,7 @@ end
 -- for patch name dump
 function patchNames(dump)
 -- parse of the incoming dump. This takes a few seconds becaus ethere are 8192 bytes
-  local result = parse_sysex(dump)
+  local result = parseSysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
     return
@@ -1886,15 +1886,15 @@ function patchNames(dump)
   -- Treat the flat array as 4 banks of 128 each and map them so pNames[bank][patch] = flat[(bank-1)*128 + patch]
   -- This produces 4 rows (banks) with 128 columns (patches) in each row.
   for bank = 1,4 do
-    nameBank[bank] = {}
+    patchNameBank[bank] = {}
     for patch = 1,128 do
       local flatIndex = (bank - 1) * 128 + patch         -- 1..512
       local byteOffset = (flatIndex - 1) * 16 + 1        -- original stepping by 16 bytes
-      nameBank[bank][patch] = get_patch_name(data, byteOffset)
+      patchNameBank[bank][patch] = getPatchName(data, byteOffset)
     end
   end
-  --for bank = 1,#nameBank do
-  --  print("bank "..bank.." : "..table.concat(nameBank[bank], " | "))
+  --for bank = 1,#patchNameBank do
+  --  print("bank "..bank.." : "..table.concat(patchNameBank[bank], " | "))
   --end
   print("patch names parsed. Number of bytes: ".. #data)
 end
@@ -1903,7 +1903,7 @@ end
 -- not used
 function currentProgram(dump)
   -- parse of the incoming dump
-  local result = parse_sysex(dump)
+  local result = parseSysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
     return
@@ -1922,112 +1922,112 @@ end
 -- info.type = "data_entry_msb" | "data_entry_lsb" | "inc" | "dec"
 -- info.msb / info.lsb included when applicable
 -- core processor expects (channel, controller, value)
-function process_cc(channel, controller, value)
+function processControlChange(channel, controller, value)
   if not channel then return end
-  local s = nrpn_state[channel] or { nrpn_msb = nil, nrpn_lsb = nil, data_msb = nil, data_lsb = nil }
+  local channelState = nrpnState[channel] or { nrpnMsb = nil, nrpnLsb = nil, dataMsb = nil, dataLsb = nil }
   -- NRPN parameter select
   if controller == 99 then -- NRPN MSB
     if value == 127 then
       -- deselect NRPN
-      s.nrpn_msb = nil; s.nrpn_lsb = nil; s.data_msb = nil; s.data_lsb = nil
+      channelState.nrpnMsb = nil; channelState.nrpnLsb = nil; channelState.dataMsb = nil; channelState.dataLsb = nil
     else
-      s.nrpn_msb = value
-      s.data_msb = nil; s.data_lsb = nil
+      channelState.nrpnMsb = value
+      channelState.dataMsb = nil; channelState.dataLsb = nil
     end
   elseif controller == 98 then -- NRPN LSB
     if value == 127 then
-      s.nrpn_msb = nil; s.nrpn_lsb = nil; s.data_msb = nil; s.data_lsb = nil
+      channelState.nrpnMsb = nil; channelState.nrpnLsb = nil; channelState.dataMsb = nil; channelState.dataLsb = nil
     else
-      s.nrpn_lsb = value
-      s.data_msb = nil; s.data_lsb = nil
+      channelState.nrpnLsb = value
+      channelState.dataMsb = nil; channelState.dataLsb = nil
     end
   -- Data Entry MSB (CC 6)
   elseif controller == 6 then
-    if s.nrpn_msb and s.nrpn_lsb then
-      s.data_msb = value
-      local param = s.nrpn_msb * 128 + s.nrpn_lsb
+    if channelState.nrpnMsb and channelState.nrpnLsb then
+      channelState.dataMsb = value
+      local param = channelState.nrpnMsb * 128 + channelState.nrpnLsb
       local combined = value
-      if s.data_lsb then
-        combined = (s.data_msb * 128) + s.data_lsb
+      if channelState.dataLsb then
+        combined = (channelState.dataMsb * 128) + channelState.dataLsb
       end
-      if nrpn_callback then
-        nrpn_callback(channel, param, combined, { type = "data_entry_msb", msb = value, lsb = s.data_lsb })
+      if nrpnCallback then
+        nrpnCallback(channel, param, combined, { type = "data_entry_msb", msb = value, lsb = channelState.dataLsb })
       end
     end
   -- Data Entry LSB (CC 38)
   elseif controller == 38 then
-    if s.nrpn_msb and s.nrpn_lsb then
-      s.data_lsb = value
-      local param = s.nrpn_msb * 128 + s.nrpn_lsb
-      local combined = ((s.data_msb or 0) * 128) + s.data_lsb
-      if nrpn_callback then
-        nrpn_callback(channel, param, combined, { type = "data_entry_lsb", msb = s.data_msb, lsb = value })
+    if channelState.nrpnMsb and channelState.nrpnLsb then
+      channelState.dataLsb = value
+      local param = channelState.nrpnMsb * 128 + channelState.nrpnLsb
+      local combined = ((channelState.dataMsb or 0) * 128) + channelState.dataLsb
+      if nrpnCallback then
+        nrpnCallback(channel, param, combined, { type = "data_entry_lsb", msb = channelState.dataMsb, lsb = value })
       end
     end
   -- Data Increment (96) / Decrement (97)
   elseif controller == 96 or controller == 97 then
-    if s.nrpn_msb and s.nrpn_lsb then
-      local param = s.nrpn_msb * 128 + s.nrpn_lsb
+    if channelState.nrpnMsb and channelState.nrpnLsb then
+      local param = channelState.nrpnMsb * 128 + channelState.nrpnLsb
       local kind = controller == 96 and "inc" or "dec"
-      if nrpn_callback then
-        nrpn_callback(channel, param, value, { type = kind, amount = value })
+      if nrpnCallback then
+        nrpnCallback(channel, param, value, { type = kind, amount = value })
       end
     end
   end
-  nrpn_state[channel] = s
+  nrpnState[channel] = channelState
 end
 
 -- wrapper that normalizes incoming args:
 -- supports (channel, controller, value) and (port, channel, controller, value)
-local function cc_wrapper(...)
+local function controlChangeWrapper(...)
   local n = select("#", ...)
   if n == 4 then
     -- (port, channel, controller, value)
     local _, channel, controller, value = ...
-    process_cc(channel, controller, value)
+    processControlChange(channel, controller, value)
   else
     -- assume (channel, controller, value)
     local channel, controller, value = ...
-    process_cc(channel, controller, value)
+    processControlChange(channel, controller, value)
   end
 end
 
 -- Utility: try to call a possible registrar safely
-local function try_call_registrar(registrar, handler)
+local function tryCallRegistrar(registrar, handler)
   local ok, err = pcall(function() registrar(handler) end)
   return ok, err
 end
 
 -- Register a single NRPN callback. Calling multiple times replaces the previous callback.
 function midi.onNrpn(callback)
-  nrpn_callback = callback
+  nrpnCallback = callback
   if not registered then
     -- If midi.onControlChange is a function, it might be either:
     -- 1) a registrar function that accepts a handler, or
     -- 2) an existing handler (callable) that should be wrapped/kept.
-    local m = midi.onControlChange
-    if type(m) == "function" then
+    local controlChangeHandler = midi.onControlChange
+    if type(controlChangeHandler) == "function" then
       -- First attempt: try calling it as a registrar: midi.onControlChange(handler)
-      local ok = try_call_registrar(m, cc_wrapper)
+      local ok = tryCallRegistrar(controlChangeHandler, controlChangeWrapper)
       if ok then
         -- registration succeeded (API is registrar-style)
         registered = true
         return
       else
         -- calling it failed -> treat it as an existing handler: wrap it
-        local existing = m
+        local existing = controlChangeHandler
         midi.onControlChange = function(...)
           -- preserve existing behavior
           pcall(existing, ...)
           -- then run our wrapper
-          cc_wrapper(...)
+          controlChangeWrapper(...)
         end
         registered = true
         return
       end
     else
       -- Not a function (nil or not present) -> assign directly
-      midi.onControlChange = cc_wrapper
+      midi.onControlChange = controlChangeWrapper
       registered = true
       return
     end
@@ -2100,7 +2100,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   -- Split Double mode toggle / request stored split-double data
   if parameterNumber == 10028 then
     if midiValue == 1 then  -- multi 
-      SD_FLAG = 1  -- set split/double flag on and request stored split/double data
+      splitDoubleFlag = 1  -- set split/double flag on and request stored split/double data
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
                        0x03,0x00,0x42,0x49,0x4E,0x20,0x53,0x70,0x6C,0x69,0x74,
                        0x20,0x44,0x6F,0x75,0x62,0x6C,0x65,0x20,0x20,0x20,0x20}
@@ -2108,4 +2108,3 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     end
   end
 end
-
