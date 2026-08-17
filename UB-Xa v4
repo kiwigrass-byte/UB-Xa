@@ -74,6 +74,7 @@ local CID = {
   UNISON_VOICE  = 53,   -- unison voice control
   BEND_CUSTOM   = 110,  -- custom bend type control
   ATROPHY_NAME  = 426,  -- atrophy profile name display
+  MIDI_TEMPO    = 52,   -- MIDI tempo display control
 }
 
 -- Voice panning NRPN parameters (16 voices)
@@ -87,7 +88,7 @@ local VOICE_PAN_PARAMS = {
 local BITMASK_CONFIGS = {
   [7]   = {54,60,59,65},           -- ControlPortamentoSettings: Match/Quantize/Bend/Exponential
   [129] = {8,10,19,97,103,109},    -- PerformanceSettings: bend/custom/OSC1/OSC2/Upper/Lower
-  [135] = {117,118,119},           -- PerformanceLFOMods: Track/Envelope/TempoLock/LFOTrig (note: 3 bits)
+  [135] = {117,118,119},           -- PerformanceLFOMods: Track/Envelope/TempoLock (3 bits)
   [261] = {37,38,39,40},           -- ModulationLFOMods: LFOTrack/LFOEnv2Rate/TempoLock/LFOTrig
   [263] = {50,51,27},              -- ModulationChannel1Sends: C1 OSC1/OSC2/Filter LFO
   [264] = {30,31},                 -- ModulationChannel1Mods: C1 Quant/LFOEnv1 Inv
@@ -354,22 +355,24 @@ local function normalizeIncomingToSigned(incoming)
   return clamp(incoming, SIGN_MIN, SIGN_MAX)
 end
 
--- Osc 1: NRPN param 513, quant param 535, control id 328 -> function name freqQ1
-function freqQ1(valueObject, value)
+-- Shared oscillator quantizer: parametrized by NRPN param, quant mode param, and control id.
+-- freqQ1 and freqQ2 both delegate to this.
+local function quantizeOscillator(valueObject, value, nrpnParam, quantParam, ctrlId)
   local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
   local incoming = normalizeIncomingToSigned(raw_in)
-  local qRaw, n, mode = quantizeSignedFor(incoming, 535)
-  parameterMap.set(deviceId, PT_NRPN, 513, qRaw)
-  applyQuantResult(qRaw, n, mode, 328, valueObject, 535)
+  local qRaw, n, mode = quantizeSignedFor(incoming, quantParam)
+  parameterMap.set(deviceId, PT_NRPN, nrpnParam, qRaw)
+  applyQuantResult(qRaw, n, mode, ctrlId, valueObject, quantParam)
+end
+
+-- Osc 1: NRPN param 513, quant param 535, control id 328 -> function name freqQ1
+function freqQ1(valueObject, value)
+  quantizeOscillator(valueObject, value, 513, 535, CID.OSC1_FREQ)
 end
 
 -- Osc 2: NRPN param 515, quant param 536, control id 95 -> function name freqQ2
 function freqQ2(valueObject, value)
-  local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
-  local incoming = normalizeIncomingToSigned(raw_in)
-  local qRaw, n, mode = quantizeSignedFor(incoming, 536)
-  parameterMap.set(deviceId, PT_NRPN, 515, qRaw)
-  applyQuantResult(qRaw, n, mode, 95, valueObject, 536)
+  quantizeOscillator(valueObject, value, 515, 536, CID.OSC2_FREQ)
 end
 
 -- helper function for making osc1 and osc2 frequency format
@@ -401,11 +404,7 @@ end
 
 -- format midi tempo value display
 function showMidiTempo(valueObject,value)
-  if value == 0 then
-    controls.get (52):setVisible (true)
-  else
-    controls.get (52):setVisible (false)
-  end
+  controls.get(CID.MIDI_TEMPO):setVisible(value == 0)
 end
 
 -- ============================================================
