@@ -141,6 +141,12 @@ function timer.onTick()
   end
 end
 
+-- helper for safely getting control id's just in case ...
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
+
 -- display functions -----------------------------------------------------------------------------------------------------------
 function displayChar (valueObject, value)
   return string.char(value)
@@ -167,14 +173,15 @@ local SIGN_MIN, SIGN_MAX = -8192, 8191
 -- tweak sensitivity if needed (<1 = more sensitive, >1 = less)
 local SENSITIVITY = 1.0
 
+-- min_st / max_st are in semitones
 local QUANT_MODES = {
   -- octave modes use semitone stepping for interaction but show octaves
-  [0] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = true }, -- +Octaves
-  [1] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = false },-- +Semitones
-  [2] = { quant = false,                 symmetric = false, octave_display = false },     -- +Free
-  [3] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = true }, -- +/- Octaves
-  [4] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = false },-- +/- Semitones
-  [5] = { quant = false,                 symmetric = true,  octave_display = false },     -- +/- Free
+  [0] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = true,  min_st = 0,   max_st = 36 }, -- +Octaves (0..+3 oct)
+  [1] = { quant = true,  step = STEP_SEMITONE, symmetric = false, octave_display = false, min_st = 0,   max_st = 36 }, -- +Semitones (0..+36 st)
+  [2] = { quant = false,                      symmetric = false, octave_display = false, min_st = 0,   max_st = 36 }, -- +Free (clamped 0..+36 st)
+  [3] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = true,  min_st = -48, max_st = 36 }, -- +/- Octaves (-4..+3 oct)
+  [4] = { quant = true,  step = STEP_SEMITONE, symmetric = true,  octave_display = false, min_st = -48, max_st = 36 }, -- +/- Semitones (-48..+36 st)
+  [5] = { quant = false,                      symmetric = true,  octave_display = false, min_st = -48, max_st = 36 }, -- +/- Free (same clamp range)
 }
 
 local function clamp(x, lo, hi) if x < lo then return lo end if x > hi then return hi end return x end
@@ -189,17 +196,13 @@ local function roundNearestSteps(signed, step)
   end
 end
 
-local function safeGet(id)
-  local ok, c = pcall(controls.get, id)
-  return ok and c or nil
-end
-
 -- Read quant mode for a given quantParam (try NRPN then VIRTUAL)
 local function readQuantModeFor(quantParam)
   local q = parameterMap.get(deviceId, PT_NRPN, quantParam)
   if q == nil then q = parameterMap.get(deviceId, PT_VIRTUAL, quantParam) end
   return tonumber(q)
 end
+
 -- Quantize given signed display value (signed_in in -8192..+8191) for given quantParam.
 -- Returns quantized raw14 value (0..16383), integer n (step multiplier), and mode table.
 local function quantizeSignedFor(signed_in, quantParam)
@@ -207,40 +210,51 @@ local function quantizeSignedFor(signed_in, quantParam)
   local qmode = readQuantModeFor(quantParam)
   local mode = QUANT_MODES[qmode] or QUANT_MODES[2]
 
+  local minSigned = (mode.min_st ~= nil) and (mode.min_st * STEP_SEMITONE) or SIGN_MIN
+  local maxSigned = (mode.max_st ~= nil) and (mode.max_st * STEP_SEMITONE) or SIGN_MAX
+  signed = clamp(signed, minSigned, maxSigned)
+
+  -- free modes
   if not mode.quant then
     if not mode.symmetric and signed < 0 then signed = 0 end
     local qRaw = clamp(signed + CENTER_RAW, RAW_MIN, RAW_MAX)
     return qRaw, 0, mode
   end
 
+  -- octave-display modes: quantize in octave units directly
+  if mode.octave_display then
+    local oct = signed / STEP_OCTAVE
+    local octN = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
+
+    local minOct = math.ceil(minSigned / STEP_OCTAVE)
+    local maxOct = math.floor(maxSigned / STEP_OCTAVE)
+    if octN < minOct then octN = minOct end
+    if octN > maxOct then octN = maxOct end
+
+    local qSigned = octN * STEP_OCTAVE
+    local qRaw = clamp(qSigned + CENTER_RAW, RAW_MIN, RAW_MAX)
+
+    -- keep n in semitone-step units for downstream formatter math
+    local n = math.floor(qSigned / STEP_SEMITONE + (qSigned >= 0 and 0.5 or -0.5))
+    return qRaw, n, mode
+  end
+
+  -- semitone quantized modes
   local step = mode.step or STEP_SEMITONE
   local n = roundNearestSteps(signed, step)
-  if not mode.symmetric and n < 0 then n = 0 end
 
-  local maxN = math.floor(SIGN_MAX / step)
-  local minN = math.ceil(SIGN_MIN / step)
-  if not mode.symmetric then minN = 0 end
-  if n > maxN then n = maxN end
+  local minN = math.ceil(minSigned / step)
+  local maxN = math.floor(maxSigned / step)
   if n < minN then n = minN end
+  if n > maxN then n = maxN end
 
   local qSigned = n * step
-  -- If octave_display requested, snap qSigned to exact octaves (multiples of 12 semitones)
-  if mode.octave_display then
-    local semitones = qSigned / STEP_SEMITONE
-    local octN = math.floor(semitones / 12 + (semitones >= 0 and 0.5 or -0.5))
-    qSigned = octN * 12 * STEP_SEMITONE
-    -- update n relative to step (step is semitone), clamp again
-    n = math.floor(qSigned / step + 0.5)
-    if not mode.symmetric and n < 0 then n = 0 end
-  end
   local qRaw = clamp(qSigned + CENTER_RAW, RAW_MIN, RAW_MAX)
   return qRaw, n, mode
 end
 
--- Helper to apply quant result to UI and NRPN (ctrlId = editor control id)
--- Sets control name to short mode label (e.g. "Transpose +Octaves")
+-- Helper to apply quant result to UI
 local function applyQuantResult(qRaw, n, mode, ctrlId, valueObject, quantParam)
-  -- update display with signed value
   local signed_out = qRaw - CENTER_RAW
   local ctrl = valueObject
   if not ctrl then ctrl = safeGet(ctrlId) end
@@ -289,9 +303,12 @@ function formatFreq1(valueObject, value)
     local showOct = mode.octave_display or (semitones % 12 == 0)
     if showOct then
       local oct = semitones / 12
-      return string.format("%+d oct (%+d st)", oct, semitones)
+      local oct_i = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
+      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
+      return string.format("%+d oct", oct_i)
     else
-      return string.format("%+d st", semitones)
+      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
+      return string.format("%+d st", st_i)
     end
   end
   return tostring(signed)
@@ -306,9 +323,12 @@ function formatFreq2(valueObject, value)
     local showOct = mode.octave_display or (semitones % 12 == 0)
     if showOct then
       local oct = semitones / 12
-      return string.format("%+d oct (%+d st)", oct, semitones)
+      local oct_i = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
+      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
+      return string.format("%+d oct", oct_i)
     else
-      return string.format("%+d st", semitones)
+      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
+      return string.format("%+d st", st_i)
     end
   end
   return tostring(signed)
