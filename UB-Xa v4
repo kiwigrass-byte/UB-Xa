@@ -15,6 +15,15 @@ local ubxaUpperCh = nil
 local ubxaLowerCh = nil
 local channelsFromSynth = true
 
+local authorDate ="New Ignis 2024"
+local patchName = authorDate  -- initialize patch name displayed in RH corner 
+local amountTicks = 0  -- Tracks how many ticks have passed
+
+-- initialize nrpm callback function data
+local nrpn_state = {}
+local nrpn_callback = nil
+local registered = false
+
 -- load the UB-Xa global settings when the preset is first loaded
 function preset.onLoad()
   getGlobals(nil,1)
@@ -33,7 +42,7 @@ end
 -- Normalize incoming channel to Electra's expected range.
 -- Set CHANNEL_BASE to 1 if your parsed UB-Xa value is 1..16.
 -- Set CHANNEL_BASE to 0 if your parsed UB-Xa value is already 0..15.
-local CHANNEL_BASE = 1
+local CHANNEL_BASE = 0
 
 local function normalizeChannel(ch)
   ch = tonumber(ch)
@@ -84,7 +93,6 @@ function assignChannel(valueObject, value)
       currentDevice:setChannel(lowerDevice:getChannel())
     end
   end
-
   refreshCurrentDeviceSnapshot()
   print("current channel now: "..tostring(currentChannel))
 end
@@ -102,14 +110,6 @@ function assignChannel(valueObject, value)
   print("current channel now: "..tostring(currentChannel))
 end
 ]]
-local authorDate ="New Ignis 2024"
-local patchName = authorDate  -- initialize patch name displayed in RH corner 
-local amountTicks = 0  -- Tracks how many ticks have passed
-
--- initialize nrpm callback function data
-local nrpn_state = {}
-local nrpn_callback = nil
-local registered = false
 
 -- helper function to make a matrix. fill is optional
 local function initMatrix(rows, cols, fill)
@@ -1763,15 +1763,13 @@ local mappings = {
 --    parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
     parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
   end
-  parsedUpperChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1159) + 1 
-  parsedLowerChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1160) + 1
-  currentChannel = parsedUpperChannel
-  if ubxaUpperCh ~= nil and ubxaLowerCh ~= nil then
-    applySynthChannels()
-  end
-  -- Example: parsedUpperChannel / parsedLowerChannel are your extracted values
-  ubxaUpperCh = normalizeChannel(parsedUpperChannel)
-  ubxaLowerCh = normalizeChannel(parsedLowerChannel)
+-- Read raw channel values from UB-Xa params
+  local rawUpper = parameterMap.get(deviceId, PT_VIRTUAL, 1159)
+  local rawLower = parameterMap.get(deviceId, PT_VIRTUAL, 1160)
+  -- Store synth truth first
+  ubxaUpperCh = normalizeChannel(rawUpper)
+  ubxaLowerCh = normalizeChannel(rawLower)
+  -- Now apply once
   applySynthChannels()
   print("global settings parsed. Number of bytes: ".. #data)
 end
