@@ -29,6 +29,7 @@ local nrpn_callback = nil
 local registered = false
 
 local SD_FLAG = 0 -- flag if using patch or split-double performance parameters instead of patch version
+local lastDisplaySDMode = nil
 
 -- load the UB-Xa global settings when the preset is first loaded
 function preset.onLoad()
@@ -660,12 +661,37 @@ function events.onPotTouchChange(potId, controlId, touched)
   if help then showHelp(help) end
 end
 
+local function resetVirtualAndControl(paramId, ctrlId)
+  parameterMap.set(deviceId, PT_VIRTUAL, paramId, 0)
+  local c = safeGet(ctrlId)
+  if c and type(c.setValue) == "function" then
+    pcall(function() c:setValue(0) end)
+  end
+end
+
 -- display function for patch mode setting values
 function patchMode(valueObject, value)
+  -- track previous mode and reset sticky params on transition
+  local prevMode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
+  -- write the new mode first so downstream reads see current state
+  parameterMap.set(deviceId, PT_VIRTUAL, 10028, value)
+  -- clear sticky params on BOTH directions
+  if prevMode ~= nil and prevMode ~= value then
+    -- transitions between 0 and 1 => reset 10030 + its control
+    if (prevMode == 0 and value == 1) or (prevMode == 1 and value == 0) then
+      resetVirtualAndControl(10030, 216)
+      resetVirtualAndControl(10024, 226)
+    end
+    -- transitions between 1 and 2 => reset 10023 + its control
+    if (prevMode == 1 and value == 2) or (prevMode == 2 and value == 1) then
+      resetVirtualAndControl(10023, 116)
+      resetVirtualAndControl(10024, 174)
+    end
+  end
   local visibilityMap = {
-    [0] = { show = {}, hide = {216,226,166,174,321,58,231} },
-    [1] = { show = {216,226,321,231}, hide = {58,166,174} },
-    [2] = { show = {166,174,58,321,231}, hide = {216,226} },
+    [0] = { show = {}, hide = {216,226,166,174,321,58,231,329} },
+    [1] = { show = {216,226,321,231,329}, hide = {58,166,174} },
+    [2] = { show = {166,174,58,321,231,329}, hide = {216,226} },
   }
   if visibilityMap[value] then
     if value == 0 then
@@ -688,12 +714,15 @@ function patchMode(valueObject, value)
   local c166  = controls.get(166)
   local c174 = controls.get(174)
   if value == 1 then
-    c216:setSlot(TARGET_SLOT1, TARGET_PAGE) -- move control 216 into page 1, slot 26
-    c226:setSlot(TARGET_SLOT2, TARGET_PAGE)-- move control 226 into page 1, slot 27
+    c216:setSlot(TARGET_SLOT1, TARGET_PAGE)
+    c226:setSlot(TARGET_SLOT2, TARGET_PAGE)
   elseif value == 2 then
-    c166:setSlot(TARGET_SLOT1, TARGET_PAGE) -- move control 216 into page 1, slot 26
-    c174:setSlot(TARGET_SLOT2, TARGET_PAGE)-- move control 226 into page 1, slot 27
+    c166:setSlot(TARGET_SLOT1, TARGET_PAGE)
+    c174:setSlot(TARGET_SLOT2, TARGET_PAGE)
   end
+  -- force redraw after resets + visibility changes
+  displaySD(nil, 0)
+  displaySD(nil, 36)
 end
 
 -- show unison voice or poly voice depending on value of unison toggle
@@ -716,15 +745,31 @@ function displaySD(valueObject, value)
   local CTRL_UPPER_NAME_DOUBLE = 216
   local CTRL_LOWER_NAME_DOUBLE = 226
   local mode = parameterMap.get(deviceId, PT_VIRTUAL, 10028)
+  -- reset sticky params on specific mode transitions (both directions)
+  if lastDisplaySDMode ~= nil and mode ~= nil and lastDisplaySDMode ~= mode then
+    -- between 0 and 1: always clear 10030/10024
+    if (lastDisplaySDMode == 0 and mode == 1) or (lastDisplaySDMode == 1 and mode == 0) then
+      parameterMap.set(deviceId, PT_VIRTUAL, 10030, 0)
+      parameterMap.set(deviceId, PT_VIRTUAL, 10024, 0)
+    end
+    -- between 1 and 2: always clear 10023/10024
+    if (lastDisplaySDMode == 1 and mode == 2) or (lastDisplaySDMode == 2 and mode == 1) then
+      parameterMap.set(deviceId, PT_VIRTUAL, 10023, 0)
+      parameterMap.set(deviceId, PT_VIRTUAL, 10024, 0)
+    end
+  end
+  lastDisplaySDMode = mode
+
   if not mode or mode == 0 then return end   -- nothing to show in single mode
   local baseIndex
-  if mode == 2 then           
-    baseIndex = value + 1     -- -- split bank starts at sdMatrix[1]
-  elseif mode == 1 then       
-    baseIndex = value + 37    -- -- double bank starts at sdMatrix[37]
+  if mode == 2 then
+    baseIndex = value + 1
+  elseif mode == 1 then
+    baseIndex = value + 37
   else
     return
   end
+
   -- validate sdMatrix row exists
   local row = sdMatrix[baseIndex]
   if not row then return end
