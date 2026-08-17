@@ -10,6 +10,11 @@ local upperChannel = upperDevice:getChannel ()
 local lowerDevice  = devices.get(3)
 local lowerChannel = lowerDevice:getChannel()
 
+-- UB-Xa-reported channels (source of truth when available)
+local ubxaUpperCh = nil
+local ubxaLowerCh = nil
+local channelsFromSynth = true
+
 -- load the UB-Xa global settings when the preset is first loaded
 function preset.onLoad()
   getGlobals(nil,1)
@@ -25,6 +30,65 @@ local function safeGet(id)
   return ok and c or nil
 end
 
+-- Normalize incoming channel to Electra's expected range.
+-- Set CHANNEL_BASE to 1 if your parsed UB-Xa value is 1..16.
+-- Set CHANNEL_BASE to 0 if your parsed UB-Xa value is already 0..15.
+local CHANNEL_BASE = 1
+
+local function normalizeChannel(ch)
+  ch = tonumber(ch)
+  if not ch then return nil end
+  if CHANNEL_BASE == 1 then
+    ch = ch - 1
+  end
+  if ch < 0 then ch = 0 end
+  if ch > 15 then ch = 15 end
+  return ch
+end
+
+local function refreshCurrentDeviceSnapshot()
+  currentChannel = currentDevice:getChannel()
+  deviceId = currentDevice:getId()
+  currentPort = currentDevice:getPort()
+end
+
+local function applySynthChannels()
+  if ubxaUpperCh ~= nil then upperDevice:setChannel(ubxaUpperCh) end
+  if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
+
+  -- keep currentDevice in sync with selected part
+  -- value mapping in your code: 0 = upper, 1 = lower
+  local partSel = parameterMap.get(deviceId, PT_VIRTUAL, 10029)
+  if partSel == 0 and ubxaUpperCh ~= nil then
+    currentDevice:setChannel(ubxaUpperCh)
+  elseif partSel == 1 and ubxaLowerCh ~= nil then
+    currentDevice:setChannel(ubxaLowerCh)
+  end
+
+  refreshCurrentDeviceSnapshot()
+end
+
+function assignChannel(valueObject, value)
+  -- Prefer UB-Xa-reported channels when both are known
+  if channelsFromSynth and ubxaUpperCh ~= nil and ubxaLowerCh ~= nil then
+    if value == 0 then -- upper
+      currentDevice:setChannel(ubxaUpperCh)
+    elseif value == 1 then -- lower
+      currentDevice:setChannel(ubxaLowerCh)
+    end
+  else
+    -- Fallback to Electra editor UI settings
+    if value == 0 then -- upper
+      currentDevice:setChannel(upperDevice:getChannel())
+    elseif value == 1 then -- lower
+      currentDevice:setChannel(lowerDevice:getChannel())
+    end
+  end
+
+  refreshCurrentDeviceSnapshot()
+  print("current channel now: "..tostring(currentChannel))
+end
+--[[
 function assignChannel(valueObject, value)
   if value == 0 then -- upper
     currentDevice:setChannel( upperDevice:getChannel()  )
@@ -37,7 +101,7 @@ function assignChannel(valueObject, value)
   currentPort      = currentDevice:getPort ()
   print("current channel now: "..tostring(currentChannel))
 end
-
+]]
 local authorDate ="New Ignis 2024"
 local patchName = authorDate  -- initialize patch name displayed in RH corner 
 local amountTicks = 0  -- Tracks how many ticks have passed
@@ -1699,9 +1763,16 @@ local mappings = {
 --    parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
     parameterMap.set(deviceId, PT_VIRTUAL, p[1], data[p[2]])
   end
-  upperChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1159) + 1 
-  lowerChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1160) + 1
-  currentChannel = upperChannel
+  parsedUpperChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1159) + 1 
+  parsedLowerChannel   = parameterMap.get(deviceId, PT_VIRTUAL, 1160) + 1
+  currentChannel = parsedUpperChannel
+  if ubxaUpperCh ~= nil and ubxaLowerCh ~= nil then
+    applySynthChannels()
+  end
+  -- Example: parsedUpperChannel / parsedLowerChannel are your extracted values
+  ubxaUpperCh = normalizeChannel(parsedUpperChannel)
+  ubxaLowerCh = normalizeChannel(parsedLowerChannel)
+  applySynthChannels()
   print("global settings parsed. Number of bytes: ".. #data)
 end
 
