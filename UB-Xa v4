@@ -294,45 +294,33 @@ function freqQ2(valueObject, value)
   applyQuantResult(qRaw, n, mode, 95, valueObject, 536)
 end
 
--- Value formatter for oscillator 1 
-function formatFreq1(valueObject, value)
+-- helper function for making osc1 and osc2 frequency format
+local function formatFreqCommon(value, quantParam)
   local signed = normalizeIncomingToSigned(value)
-  local qRaw, n, mode = quantizeSignedFor(signed, 535)
+  local _, n, mode = quantizeSignedFor(signed, quantParam)
   if mode and mode.quant then
     local semitones = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
     local showOct = mode.octave_display or (semitones % 12 == 0)
     if showOct then
       local oct = semitones / 12
       local oct_i = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
-      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
       return string.format("%+d oct", oct_i)
-    else
-      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
-      return string.format("%+d st", st_i)
     end
+
+    local st_i = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
+    return string.format("%+d st", st_i)
   end
   return tostring(signed)
 end
 
--- Value formatter for oscillator 2 
-function formatFreq2(valueObject, value)
-  local signed = normalizeIncomingToSigned(value)
-  local qRaw, n, mode = quantizeSignedFor(signed, 536)
-  if mode and mode.quant then
-    local semitones = (n * (mode.step or STEP_SEMITONE)) / STEP_SEMITONE
-    local showOct = mode.octave_display or (semitones % 12 == 0)
-    if showOct then
-      local oct = semitones / 12
-      local oct_i = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
-      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
-      return string.format("%+d oct", oct_i)
-    else
-      local st_i  = (semitones >= 0) and math.floor(semitones + 0.5) or math.ceil(semitones - 0.5)
-      return string.format("%+d st", st_i)
-    end
-  end
-  return tostring(signed)
+function formatFreq1(valueObject, value)
+  return formatFreqCommon(value, 535)
 end
+
+function formatFreq2(valueObject, value)
+  return formatFreqCommon(value, 536)
+end
+
 
 function showMidiTempo(valueObject,value)
   if value == 0 then
