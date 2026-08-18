@@ -577,19 +577,19 @@ function patchMode(valueObject, value)
   if prevMode ~= nil and prevMode ~= value then
     -- transitions between 0 and 1 => reset DOUBLE_NUMBER + its control
     if (prevMode == 0 and value == 1) or (prevMode == 1 and value == 0) then
-      resetVirtualAndControl(DOUBLE_NUMBER, 216)
-      resetVirtualAndControl(DUMMY_NUMBER, 226)
+      resetVirtualAndControl(DOUBLE_NUMBER, CTRL_UPPER_DOUBLE)
+      resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_DOUBLE)
     end
     -- transitions between 1 and 2 => reset SPLIT_NUMBER + its control
     if (prevMode == 1 and value == 2) or (prevMode == 2 and value == 1) then
-      resetVirtualAndControl(SPLIT_NUMBER, 116)
-      resetVirtualAndControl(DUMMY_NUMBER, 174)
+      resetVirtualAndControl(SPLIT_NUMBER, CTRL_UPPER_SPLIT)
+      resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_SPLIT)
     end
   end
   local visibilityMap = {
-    [0] = { show = {}, hide = {216,226,166,174,321,58,231,329} },
-    [1] = { show = {216,226,321,231,329}, hide = {58,166,174} },
-    [2] = { show = {166,174,58,321,231,329}, hide = {216,226} },
+    [0] = { show = {}, hide = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE,CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT,321,58,231,329} },
+    [1] = { show = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE,321,231,329}, hide = {58,CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT} },
+    [2] = { show = {CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT,58,321,231,329}, hide = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE} },
   }
   if visibilityMap[value] then
     if value == 0 then -- single mode
@@ -2013,4 +2013,3 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     end
   end
 end
-
