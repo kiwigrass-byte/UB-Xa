@@ -183,8 +183,8 @@ function timer.onTick()
   end
 end
 
-------------------------------- display functions ----------------------------------------------------------------
--- Osc quantizer, mode labels, and value formatters for UB-Xa preset
+------------------------------- callback functions ----------------------------------------------------------------
+------- Osc quantizer, mode labels, and value formatters for UB-Xa preset---------------
 -- Supports:
 --  - freqQ1 : oscillator 1 editor Function (NRPN OSC_1, quant param QUANT_1, control id CTRL_FREQ1)
 --  - freqQ2 : oscillator 2 editor Function (NRPN OSC_2, quant param QUANT_2, control id CTRL_FREQ2)
@@ -202,7 +202,7 @@ local RAW_MIN, RAW_MAX = 0, 16383
 local SIGN_MIN, SIGN_MAX = -8192, 8191
 
 -- tweak sensitivity if needed (<1 = more sensitive, >1 = less)
-local SENSITIVITY = 1.0
+local SENSITIVITY = 1
 
 -- min_st / max_st are in semitones
 local QUANT_MODES = {
@@ -244,41 +244,33 @@ local function quantizeSignedFor(signed_in, quantParam)
   local minSigned = (mode.min_st ~= nil) and (mode.min_st * STEP_SEMITONE) or SIGN_MIN
   local maxSigned = (mode.max_st ~= nil) and (mode.max_st * STEP_SEMITONE) or SIGN_MAX
   signed = clamp(signed, minSigned, maxSigned)
-
   -- free modes
   if not mode.quant then
     if not mode.symmetric and signed < 0 then signed = 0 end
     local qRaw = clamp(signed + CENTER_RAW, RAW_MIN, RAW_MAX)
     return qRaw, 0, mode
   end
-
   -- octave-display modes: quantize in octave units directly
   if mode.octave_display then
     local oct = signed / STEP_OCTAVE
     local octN = (oct >= 0) and math.floor(oct + 0.5) or math.ceil(oct - 0.5)
-
     local minOct = math.ceil(minSigned / STEP_OCTAVE)
     local maxOct = math.floor(maxSigned / STEP_OCTAVE)
     if octN < minOct then octN = minOct end
     if octN > maxOct then octN = maxOct end
-
     local qSigned = octN * STEP_OCTAVE
     local qRaw = clamp(qSigned + CENTER_RAW, RAW_MIN, RAW_MAX)
-
     -- keep n in semitone-step units for downstream formatter math
     local n = math.floor(qSigned / STEP_SEMITONE + (qSigned >= 0 and 0.5 or -0.5))
     return qRaw, n, mode
   end
-
   -- semitone quantized modes
   local step = mode.step or STEP_SEMITONE
   local n = roundNearestSteps(signed, step)
-
   local minN = math.ceil(minSigned / step)
   local maxN = math.floor(maxSigned / step)
   if n < minN then n = minN end
   if n > maxN then n = maxN end
-
   local qSigned = n * step
   local qRaw = clamp(qSigned + CENTER_RAW, RAW_MIN, RAW_MAX)
   return qRaw, n, mode
