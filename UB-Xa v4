@@ -66,7 +66,6 @@ local CTRL_POLY_VOICES = 48
 local CTRL_UNISON_VOICES = 53
 local CTRL_MASTER_TEMPO = 52
 
-
 -- slot locations
 local TARGET_SD_SLOT1 = 26
 local TARGET_SD_SLOT2 = 27
@@ -158,19 +157,24 @@ local function initMatrix(rows, cols, fill)
   return m
 end
 
-local nameBank = initMatrix(128,4,"PATCH") -- initialize matrix to store patch names by bank (128 x 4) 
-local sdMatrix = initMatrix(72,12) -- initialize matrix to store split double data (72 x 12)
-local panDefValue = {} 
-for i = 1,16 do panDefValue[i] = 128 end -- initialize voice panning parameter defaults (16 x 1)
+-- initialize matrix to store patch names by bank (128 x 4)
+local nameBank = initMatrix(128,4,"PATCH")  
 
--- for external control of sequencer start/stop if mid sync -> USB or DIM 
+-- initialize matrix to store split double data (72 x 12)
+local sdMatrix = initMatrix(72,12) 
+
+-- initialize voice panning parameter defaults (16 x 1)
+local panDefValue = {} 
+for i = 1,16 do panDefValue[i] = 128 end 
+
+-- external control of sequencer start/stop if mid sync -> USB or DIM 
 function seqStartStop(valueObject, value)
   if value == 1 then midi.sendStart(currentPort)
     else midi.sendStop(currentPort)
   end
 end
 
--- for starting and stopping the timer for displaying names and help text
+-- starting and stopping the timer for displaying names and help text
 function timer.onTick()
   amountTicks = amountTicks + 1
   if amountTicks > 4 then
@@ -547,7 +551,6 @@ function events.onPotTouchChange(potId, controlId, touched)
   if help then showHelp(help) end
 end
 
-
 -- callback function for showing master midi tempo control 
 function showMidiTempo(valueObject,value)
   if value == 0 then
@@ -589,15 +592,14 @@ end
 
 -- callback function for patch mode parameter
 function patchMode(valueObject, value)
-  if value == 0 then -- single mode
-    SD_FLAG = 0 -- split/double flag off
+  if value == 0 then
+    SD_FLAG = 0 
   end
-  -- transitions between 0 and 1 => reset DOUBLE_NUMBER + its control
   if value == 1 then 
+    SD_FLAG = 1
     resetVirtualAndControl(DOUBLE_NUMBER, CTRL_UPPER_DOUBLE)
     resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_DOUBLE)
   end
-  -- transitions from 1 to 2 => reset SPLIT_NUMBER + its control
   if value == 2 then
     resetVirtualAndControl(SPLIT_NUMBER, CTRL_UPPER_SPLIT)
     resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_SPLIT)
@@ -627,15 +629,12 @@ end
 function displaySD(valueObject, value)
   local BANK_NAMES = {"A","B","C","D"}
   local mode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
-  -- reset sticky params on specific mode transitions (both directions)
-    -- 0 -> 1, 1 <- 0, and 2 -> 1: always clear SPLIT_NUMBER
-    if (mode == 1) then
-      parameterMap.set(deviceId, PT_VIRTUAL, SPLIT_NUMBER, 0)
-    end
-    -- 1 -> 2: always clear DOUBLE_NUMBER
-    if mode == 2 then
-      parameterMap.set(deviceId, PT_VIRTUAL, DOUBLE_NUMBER, 36)
-    end
+  if mode == 1 then
+    parameterMap.set(deviceId, PT_VIRTUAL, SPLIT_NUMBER, 0)
+  end
+  if mode == 2 then
+    parameterMap.set(deviceId, PT_VIRTUAL, DOUBLE_NUMBER, 36)
+  end
   if not mode or mode == 0 then return end   -- nothing to show in single mode
   local baseIndex
   if mode == 2 then
@@ -1981,7 +1980,6 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   -- Split Double mode toggle / request stored split-double data
   if parameterNumber == PATCH_MODE then
     if midiValue == 1 then  -- multi 
-      SD_FLAG = 1  -- set split/double flag on and request stored split/double data
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
                        0x03,0x00,0x42,0x49,0x4E,0x20,0x53,0x70,0x6C,0x69,0x74,
                        0x20,0x44,0x6F,0x75,0x62,0x6C,0x65,0x20,0x20,0x20,0x20}
