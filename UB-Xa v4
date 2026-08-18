@@ -54,18 +54,18 @@ local QUANT_2 = 536
 
 -- control ids
 local CTRL_BEND_RANGE = 110
+local CTRL_PART_SELECT = 231
 local CTRL_UPPER_DOUBLE = 216
 local CTRL_LOWER_DOUBLE = 226
 local CTRL_UPPER_SPLIT = 166
 local CTRL_LOWER_SPLIT = 174
+local CTRL_SELECT_SD = 329
+local CTRL_SPLIT_KYBD = 58
+local CTRL_BALANCE = 321
 local CTRL_POLY_VOICES = 48
 local CTRL_UNISON_VOICES = 53
 local CTRL_MASTER_TEMPO = 52
---local CTRL_POSITIVE_OCTAVES1 = 86
---local CTRL_POSITIVE_OCTAVES2 = 17
---local CTRL_OCTAVES1 = 326
---local CTRL_FREQ1 = 328
---local CTRL_FREQ2 = 95
+
 
 -- slot locations
 local TARGET_SD_SLOT1 = 26
@@ -73,9 +73,6 @@ local TARGET_SD_SLOT2 = 27
 local TARGET_SD_PAGE = 1
 local TARGET_VOICE_SLOT = 20
 local TARGET_VOICE_PAGE = 4
---local TARGET_FREQ_SLOT1 = 1
---local TARGET_FREQ_SLOT2 = 7
---local TARGET_FREQ_PAGE = 4
 
 -- load the UB-Xa global settings when the preset is first loaded
 function preset.onLoad()
@@ -592,33 +589,30 @@ end
 
 -- callback function for patch mode parameter
 function patchMode(valueObject, value)
-    -- transitions between 0 and 1 => reset DOUBLE_NUMBER + its control
-    if value == 1 then 
-      resetVirtualAndControl(DOUBLE_NUMBER, CTRL_UPPER_DOUBLE)
-      resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_DOUBLE)
-    end
-    -- transitions from 1 to 2 => reset SPLIT_NUMBER + its control
-    if value == 2 then
-      resetVirtualAndControl(SPLIT_NUMBER, CTRL_UPPER_SPLIT)
-      resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_SPLIT)
-    end
+  if value == 0 then -- single mode
+    SD_FLAG = 0 -- split/double flag off
+  end
+  -- transitions between 0 and 1 => reset DOUBLE_NUMBER + its control
+  if value == 1 then 
+    resetVirtualAndControl(DOUBLE_NUMBER, CTRL_UPPER_DOUBLE)
+    resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_DOUBLE)
+  end
+  -- transitions from 1 to 2 => reset SPLIT_NUMBER + its control
+  if value == 2 then
+    resetVirtualAndControl(SPLIT_NUMBER, CTRL_UPPER_SPLIT)
+    resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_SPLIT)
+  end
   local visibilityMap = {
-    [0] = { show = {}, hide = {216,226,166,174,321,58,231,329} },
-    [1] = { show = {216,226,321,231,329}, hide = {58,166,174} },
-    [2] = { show = {166,174,58,321,231,329}, hide = {216,226} },
+    [0] = { show = {}, hide = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE,CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT,CTRL_BALANCE,58,CTRL_PART_SELECT,329} },
+    [1] = { show = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE,CTRL_BALANCE,CTRL_PART_SELECT,329}, hide = {58,CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT} },
+    [2] = { show = {CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT,58,CTRL_BALANCE,CTRL_PART_SELECT,329}, hide = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE} },
   }
-  if visibilityMap[value] then
-    if value == 0 then -- single mode
-      parameterMap.set(deviceId, PT_VIRTUAL, PART_NUMBER, 0)
-      SD_FLAG = 0 -- split/double flag off
-    end
-    local config = visibilityMap[value]
-    for _,id in ipairs(config.hide) do
-      local c = safeGet(id); if c then c:setVisible(false) end
-    end
-    for _,id in ipairs(config.show) do
-      local c = safeGet(id); if c then c:setVisible(true) end
-    end
+  local config = visibilityMap[value]
+  for _,id in ipairs(config.hide) do
+    local c = safeGet(id); if c then c:setVisible(false) end
+  end
+  for _,id in ipairs(config.show) do
+    local c = safeGet(id); if c then c:setVisible(true) end
   end
   if value == 1 then
     controls.get(CTRL_UPPER_DOUBLE):setSlot(TARGET_SD_SLOT1, TARGET_SD_PAGE)
@@ -627,9 +621,6 @@ function patchMode(valueObject, value)
     controls.get(CTRL_UPPER_SPLIT):setSlot(TARGET_SD_SLOT1, TARGET_SD_PAGE)
     controls.get(CTRL_LOWER_SPLIT):setSlot(TARGET_SD_SLOT2, TARGET_SD_PAGE)
   end
-  -- force redraw after resets + visibility changes
-  displaySD(nil, 0)
-  displaySD(nil, 36)
 end
 
 -- callback function for double/split bank/patch number parameters
