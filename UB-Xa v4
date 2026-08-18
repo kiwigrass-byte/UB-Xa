@@ -79,12 +79,14 @@ local TARGET_FREQ_PAGE = 4
 function preset.onLoad()
   getGlobals(nil,1)
 end
+
 -- load the UB-Xa patch names from all 4 banks when the preset is first loaded AND read to give more time for dump
 function preset.onReady()
   pages.display(1)
   getPatchNames(nil,1)
 end
--- helper to make sure bad control id numbers are called
+
+-- helper to make sure bad control id numbers are not called
 local function safeGet(id)
   local ok, c = pcall(controls.get, id)
   return ok and c or nil
