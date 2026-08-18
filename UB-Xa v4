@@ -1962,7 +1962,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
       end
     end
   end
-  -- atrophy data when a profile number has been selected
+  -- request atrophy data when a profile number has been selected
   if parameterNumber == ATROPHY_NUMBER then
     if midiValue == 8 then -- profile saved in patch
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
@@ -1977,7 +1977,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
       midi.sendSysex(currentPort, message)
     end
   end
-  -- Split Double mode toggle / request stored split-double data
+  -- request stored split-double data
   if parameterNumber == PATCH_MODE then
     if midiValue == 1 then  -- multi 
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
