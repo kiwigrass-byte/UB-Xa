@@ -1,5 +1,5 @@
 -- Behringer UB-Xa
--- INFORMATION and GLOBAL SETTINGS
+----------------------------  general global settings --------------------------------------- 
 local MODEL_BYTE = 0x3A  -- set Desktop Model
 -- MODEL_BYTE = 0x21  -- Keyboard Model
 local currentDevice  = devices.get(1)
@@ -16,21 +16,21 @@ local ubxaUpperCh = nil
 local ubxaLowerCh = nil
 local channelsFromSynth = true
 
-local authorDate ="New Ignis 2024"
-local patchName = authorDate  -- initialize patch name displayed in RH corner 
-local amountTicks = 0  -- Tracks how many ticks have passed
+local authorDate = "New Ignis 2024" -- populate the bottom RH screen information display on load
 info.setText(authorDate)
+local patchName = authorDate  -- initialize patch name displayed in RH corner 
+local amountTicks = 0  -- Tracks how many ticks have passed for the timer.onTick function
 timer.setPeriod(500) -- Set timer tick rate (e.g., every 500 milliseconds)
 
 events.subscribe(POTS) -- for pot touch help
 
--- initialize nrpm callback function data
+-- initialize data for the nrpn callback function
 local nrpn_state = {}
 local nrpn_callback = nil
 local registered = false
 
-local SD_FLAG = 0 -- flag if using patch or split-double performance parameters instead of patch version
-local lastDisplaySDMode = nil
+local SD_FLAG = 0 -- flag if using patch (0) or split-double (1) performance parameters when parsing a patch
+local lastDisplaySDMode = nil -- initialize the displaySD data
 
 -- virtual parameter numbers
 local BANK_NUMBER = 6032
@@ -53,17 +53,19 @@ local QUANT_1 = 535
 local QUANT_2 = 536
 
 -- control ids
+local CTRL_BEND_RANGE = 110
 local CTRL_UPPER_DOUBLE = 216
 local CTRL_LOWER_DOUBLE = 226
 local CTRL_UPPER_SPLIT = 166
 local CTRL_LOWER_SPLIT = 174
 local CTRL_POLY_VOICES = 48
 local CTRL_UNISON_VOICES = 53
-local CTRL_POSITIVE_OCTAVES1 = 86
-local CTRL_POSITIVE_OCTAVES2 = 17
-local CTRL_OCTAVES1 = 326
-local CTRL_FREQ1 = 328
-local CTRL_FREQ2 = 95
+local CTRL_MASTER_TEMPO = 52
+--local CTRL_POSITIVE_OCTAVES1 = 86
+--local CTRL_POSITIVE_OCTAVES2 = 17
+--local CTRL_OCTAVES1 = 326
+--local CTRL_FREQ1 = 328
+--local CTRL_FREQ2 = 95
 
 -- slot locations
 local TARGET_SD_SLOT1 = 26
@@ -71,16 +73,16 @@ local TARGET_SD_SLOT2 = 27
 local TARGET_SD_PAGE = 1
 local TARGET_VOICE_SLOT = 20
 local TARGET_VOICE_PAGE = 4
-local TARGET_FREQ_SLOT1 = 1
-local TARGET_FREQ_SLOT2 = 7
-local TARGET_FREQ_PAGE = 4
+--local TARGET_FREQ_SLOT1 = 1
+--local TARGET_FREQ_SLOT2 = 7
+--local TARGET_FREQ_PAGE = 4
 
 -- load the UB-Xa global settings when the preset is first loaded
 function preset.onLoad()
   getGlobals(nil,1)
 end
 
--- load the UB-Xa patch names from all 4 banks when the preset is first loaded AND read to give more time for dump
+-- switch to page 1 and load the UB-Xa patch names from all 4 banks when the preset is first loaded AND read to give more time for dump
 function preset.onReady()
   pages.display(1)
   getPatchNames(nil,1)
@@ -92,41 +94,27 @@ local function safeGet(id)
   return ok and c or nil
 end
 
--- Normalize incoming channel to Electra's expected range.
--- Set CHANNEL_BASE to 0 since UB-Xa channel value is 0..15.
-local CHANNEL_BASE = 0
-
-local function normalizeChannel(ch)
-  ch = tonumber(ch)
-  if not ch then return nil end
-  if CHANNEL_BASE == 1 then
-    ch = ch - 1
-  end
-  if ch < 0 then ch = 0 end
-  if ch > 15 then ch = 15 end
-  return ch
-end
-
+-- helper function for refresshing device information after when reading UB-Xa cahnnel settings 
 local function refreshCurrentDeviceSnapshot()
   currentChannel = currentDevice:getChannel()
   deviceId = currentDevice:getId()
   currentPort = currentDevice:getPort()
 end
 
+-- helper function to keep currentDevice in sync with selected part
 local function applySynthChannels()
   if ubxaUpperCh ~= nil then upperDevice:setChannel(ubxaUpperCh) end
   if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
-  -- keep currentDevice in sync with selected part
-  -- value mapping in your code: 0 = upper, 1 = lower
-  local partSel = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
-  if partSel == 0 and ubxaUpperCh ~= nil then
+  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
+  if part == 0 and ubxaUpperCh ~= nil then
     currentDevice:setChannel(ubxaUpperCh)
-  elseif partSel == 1 and ubxaLowerCh ~= nil then
+  elseif part == 1 and ubxaLowerCh ~= nil then
     currentDevice:setChannel(ubxaLowerCh)
   end
   refreshCurrentDeviceSnapshot()
 end
 
+-- assign MIDI channel based on value of part select parameter
 function assignChannel(valueObject, value)
   -- Prefer UB-Xa-reported channels when both are known
   if channelsFromSynth and ubxaUpperCh ~= nil and ubxaLowerCh ~= nil then
@@ -144,7 +132,14 @@ function assignChannel(valueObject, value)
     end
   end
   refreshCurrentDeviceSnapshot()
---  print("current channel now: "..tostring(currentChannel))
+end
+
+-- helper function to extract ascii bytes from a number
+local function asciiBytesFromNumber(n, width)
+  local s = string.format("%0"..tostring(width).."d", n)
+  local bytes = {}
+  for i=1,#s do bytes[#bytes+1] = string.byte(s,i) end
+  return bytes
 end
 
 -- helper function to make a matrix. fill is optional
@@ -166,11 +161,10 @@ local function initMatrix(rows, cols, fill)
   return m
 end
 
-local nameBank = initMatrix(128,4,"PATCH")
+local nameBank = initMatrix(128,4,"PATCH") -- initialize matrix to store patch names by bank (128 x 4) 
 local sdMatrix = initMatrix(72,12) -- initialize matrix to store split double data (72 x 12)
-
-local panDefValue = {} -- initailize panning
-for i = 1,16 do panDefValue[i] = 128 end -- all in center
+local panDefValue = {} 
+for i = 1,16 do panDefValue[i] = 128 end -- initialize voice panning parameter defaults (16 x 1)
 
 -- for external control of sequencer start/stop if mid sync -> USB or DIM 
 function seqStartStop(valueObject, value)
@@ -188,11 +182,7 @@ function timer.onTick()
   end
 end
 
--- display functions -----------------------------------------------------------------------------------------------------------
-function displayChar (valueObject, value)
-  return string.char(value)
-end
-
+------------------------------- display functions ----------------------------------------------------------------
 -- Osc quantizer, mode labels, and value formatters for UB-Xa preset
 -- Supports:
 --  - freqQ1 : oscillator 1 editor Function (NRPN OSC_1, quant param QUANT_1, control id CTRL_FREQ1)
@@ -334,7 +324,7 @@ function freqQ2(valueObject, value)
   applyQuantResult(qRaw, n, mode, CTRL_FREQ2, valueObject, QUANT_2)
 end
 
--- helper function for making osc1 and osc2 frequency format
+-- helper function for making osc1 and osc2 frequency formatter
 local function formatFreqCommon(value, quantParam)
   local signed = normalizeIncomingToSigned(value)
   local _, n, mode = quantizeSignedFor(signed, quantParam)
@@ -361,16 +351,6 @@ function formatFreq2(valueObject, value)
   return formatFreqCommon(value, QUANT_2)
 end
 
--- format midi tempo value display
-function showMidiTempo(valueObject,value)
-  if value == 0 then
-    controls.get (52):setVisible (true)
-  else
-    controls.get (52):setVisible (false)
-  end
-end
-
----- value formater functions ----
 -- format per voice Pan
 function fmtPan(valueObject,value)
   local control = valueObject:getControl():getId()
@@ -474,6 +454,7 @@ end
 function trackOffset (valueObject, value)
     return (string.format ("%d semitones", -value))
 end
+-- various atrophy parameter formatters
 function toHertz1 (valueObject, value)
   local x = (2^((value-255)/27.63083863))*60
     return (string.format ("%.2f HZ", x))
@@ -577,7 +558,16 @@ local function resetVirtualAndControl(paramId, ctrlId)
   end
 end
 
--- display function for patch mode setting values
+-- callback function for showing master midi tempo control 
+function showMidiTempo(valueObject,value)
+  if value == 0 then
+    controls.get (CTRL_MASTER_TEMPO):setVisible (true)
+  else
+    controls.get (CTRL_MASTER_TEMPO):setVisible (false)
+  end
+end
+
+-- callback function for patch mode parameter
 function patchMode(valueObject, value)
   -- track previous mode and reset sticky params on transition
   local prevMode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
@@ -635,16 +625,7 @@ function swapVoiceType(valueObject, value)
   end
 end
 
--- show octave or frequency control depending on value of quantification parameter
-function quantFreq1(valueObject, value)
-  controls.get(CTRL_FREQ1):setSlot(TARGET_FREQ_SLOT1, TARGET_FREQ_PAGE)
-end
-
--- show octave or frequency control depending on value of quantification parameter
-function quantFreq2(valueObject, value)
-  controls.get(CTRL_FREQ2):setSlot(TARGET_FREQ_SLOT2, TARGET_FREQ_PAGE)
-end
-
+-- callback function for double/split bank/patch number parameters
 function displaySD(valueObject, value)
   local BANK_NAMES = {"A","B","C","D"}
   local mode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
@@ -715,7 +696,7 @@ function displaySD(valueObject, value)
   end
 end
 
--- panning control parameter
+-- callback function for panning control parameter
 function setPanType(valueObject, type)
   if type == nil then return end
   local widthControl = math.min(parameterMap.get(deviceId, PT_VIRTUAL,201),100)
@@ -736,6 +717,7 @@ function setPanType(valueObject, type)
   end  
 end 
 
+-- callback function for panning width parameter
 function setPanWidth(valueObject, value)
   local widthControl = parameterMap.get(deviceId, PT_VIRTUAL,201)
   local paramList = {
@@ -748,11 +730,12 @@ function setPanWidth(valueObject, value)
   end
 end
 
-function setPanDefault(valueObject, value)
-  local parameterNumber = valueObject:getMessage ():getParameterNumber ()
-  panDefValue[parameterNumber+1-2176] = value+128
-end
+--function setPanDefault(valueObject, value)
+--  local parameterNumber = valueObject:getMessage ():getParameterNumber ()
+--  panDefValue[parameterNumber+1-2176] = value+128
+--end
 
+-- callback function for patch number parameter
 function displayPatch (valueObject, value)
   local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
@@ -784,67 +767,72 @@ function bitMask007(valueObject,value) -- NRPN 0/7 = 7 ControlPortamentoSettings
 -- Bitmask: Match (0001) Quantize (0010) Bend (0100) Exponential (1000)
   sendBitmask(7, deviceId, {54,60,59,65})
 end
+
 function bitMask101(valueObject,value) -- NRPN 1/1 = 129 PerformanceSettings 
 -- Bitmask: Bend Osc2 only~Bend Osc1&Osc2 (000001) Custombend~Bend +/-2 (000010) OSC1 (000100) OSC2 (001000) Upper (010000) Lower (100000)
   sendBitmask(129, deviceId, {8,10,19,97,103,109}) 
-  local bendType = parameterMap.get(deviceId, PT_VIRTUAL, 10)
-  if bendType == 0 then
-    controls.get (110):setVisible (false)
-  elseif bendType == 1 then
-    controls.get (110):setVisible (true)
+  local amount = parameterMap.get(deviceId, PT_VIRTUAL, 10)
+  -- display bend range only if AMOUNT parameter == 1
+  if amount == 0 then
+    controls.get (CTRL_BEND_RANGE):setVisible (false)
+  elseif amount == 1 then
+    controls.get (CTRL_BEND_RANGE):setVisible (true)
   end
 end
+
 function bitMask107(valueObject,value) -- NRPN 1/7 = 135 PerformanceLFOMods 
 -- Bitmask: Track (0001) Envelope (0010) TempoLock (0100) LFOTrig (1000)
   sendBitmask(135, deviceId, {117,118,119}) 
 end
+
 function bitMask205(valueObject,value) -- NRPN 2/5 = 261 ModulationLFOMods 
 -- Bitmask: LFO Track on~LFO Track off (0001) LFOEnv2 Rate on~LFOEnv2 Rate off (0010) TempoLock (0100) LFOTrig (1000)
   sendBitmask(261, deviceId, {37,38,39,40}) 
 end
+
 function bitMask207(valueObject,value) -- NRPN 2/7 = 263 ModulationChannel1Sends 
 -- Bitmask: C1 OSC1 LFO on~C1 OSC1 LFO off (001) C1 OSC2 LFO on~C1 OSC2 LFO off (010) C1 Flt LFO on~C1 Flt LFO off (100)
   sendBitmask(263, deviceId, {50,51,27}) 
 end
+
 function bitMask208(valueObject,value) -- NRPN 2/8 = 264 ModulationChannel1Mods 
 -- Bitmask: C1 Quant on~C1 Quant off (01) LFOEnv1 Inv on~LFOEnv1 Inv off (10)
   sendBitmask(264, deviceId, {30,31}) 
 end
+
 function bitMask209(valueObject,value) -- NRPN 2/9 = 265 ModulationChannel2Sends 
 -- Bitmask: C2 PWM1 LFO on~C2 PWM1 LFO off (001) C2 PWM2 LFO on~C2 PWM2 LFO off (010) C2 Vol LFO on~C2 Vol LFO off (100)
   sendBitmask(265, deviceId, {33,35,44}) 
 end
+
 function bitMask210(valueObject,value) -- NRPN 2/10 = 266 ModulationChannel2Mods 
 -- Bitmask: C2 Quant on~C2 Quant off (01) LFOEnv2 Inv on~LFOEnv2 Inv off (10)
   sendBitmask(266, deviceId, {49,46}) 
 end
+
 function bitMask313(valueObject,value) -- NRPN 3/13 = 397 EnvelopesFilterMods 
 -- Bitmask: Flip (00001) Repeat (00010) Retrig (00100) Loop (01000) Legato (10000)
   sendBitmask(397, deviceId, {136,137,138,139,140}) 
 end
+
 function bitMask314(valueObject,value) -- NRPN 3/14 = 398 EnvelopesLoudnessMods 
 -- Bitmask: Flip (00001) Repeat (00010) Retrig (00100) Loop (01000) Legato (10000)
   sendBitmask(398, deviceId, {141,142,143,144,145}) 
 end
+
 function bitMask404(valueObject,value) -- NRPN 4/4 = 516 ModulationChannel1Mods 
 -- Bitmask: OSC2 sync on~OSC2 sync off (01) OSC2 f-env on~OSC2 f-env off (10)
   sendBitmask(516, deviceId, {2,9}) 
 end
+
 function bitMask405(valueObject,value) -- NRPN 4/5 = 517 OscillatorsOSC1State
 -- Bitmask: OSC1 full~OSC1 off (001) OSC1 VCO LFO 180~OSC1 VCO LFO 0 (010) OSC1 PWM LFO 180~OSC1 PWM LFO 0 (100)
   sendBitmask(517, deviceId, {3,154,155}) 
 end
+
 function bitMask504(valueObject,value) -- NRPN 5/4 = 644 FilterModes 
 -- Bitmask: Filter track on~Filter track off (01) 4 pole filter~2 pole filter (10)
   sendBitmask(644, deviceId, {76,89}) 
-end
-
--- helper function to extract ascii bytes from a number
-local function asciiBytesFromNumber(n, width)
-  local s = string.format("%0"..tostring(width).."d", n)
-  local bytes = {}
-  for i=1,#s do bytes[#bytes+1] = string.byte(s,i) end
-  return bytes
 end
 
 -- patch select program change functions -----------------------------------------------------------------------------------------------------------
@@ -1113,6 +1101,7 @@ end
 -- helper function for get_patch_name
 local function trim(s) return s:match("^%s*(.-)%s*$") end
 
+-- function to pull the patch name from a patch dump
 function get_patch_name(data,startIdx)
   if type(data) ~= "table" then return "" end
   local nameChars = {}
@@ -1130,6 +1119,7 @@ function get_patch_name(data,startIdx)
   return trim(table.concat(nameChars))
 end
 
+-- function to pull an atrophy profile name from an patch/atrophy dump
 function get_atrophy_name(data,startIdx)
   if type(data) ~= "table" then return "" end
   local nameChars = {}
@@ -1143,8 +1133,8 @@ function get_atrophy_name(data,startIdx)
   return trim(table.concat(nameChars))
 end
 
--- process incoming sysEx messages -------------------------------
--- helper functions and globals for midi.onSysex 
+------------------------------------- process incoming sysEx messages -------------------------------
+-- globals and helper functions for midi.onSysex 
 local sysex_states = {}
 local VENDOR_ID = {0x00, 0x20, 0x32} -- Behringer
 local HEADER_MSG_TYPE = 1
@@ -1720,8 +1710,8 @@ function global(dump)
   -- UB-Xa gives 0..15 so add 1
   local rawUpper = parameterMap.get(deviceId, PT_NONE, 1159) + 1
   local rawLower = parameterMap.get(deviceId, PT_NONE, 1160) + 1
-  ubxaUpperCh = normalizeChannel(rawUpper)  -- with CHANNEL_BASE=0
-  ubxaLowerCh = normalizeChannel(rawLower)
+  ubxaUpperCh = rawUpper
+  ubxaLowerCh = rawLower
   -- Mirror into the UI devices
   if ubxaUpperCh ~= nil then upperDevice:setChannel(ubxaUpperCh) end
   if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
