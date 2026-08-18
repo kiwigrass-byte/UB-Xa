@@ -1,8 +1,5 @@
 -- Behringer UB-Xa
--- ============================================================
--- DEVICE SETUP & GLOBAL STATE
--- ============================================================
-
+-- INFORMATION and GLOBAL SETTINGS
 local MODEL_BYTE = 0x3A  -- set Desktop Model
 -- MODEL_BYTE = 0x21  -- Keyboard Model
 local currentDevice  = devices.get(1)
@@ -35,74 +32,48 @@ local registered = false
 local SD_FLAG = 0 -- flag if using patch or split-double performance parameters instead of patch version
 local lastDisplaySDMode = nil
 
--- =============================================================================
--- Constants
--- =============================================================================
+-- virtual parameter numbers
+local BANK_NUMBER = 6032
+local PATCH_NUMBER = 6033
+local SELECT_MINUS = 6034
+local SELECT_IT = 6035
+local SELECT_PLUS = 6036
+local SELECT_SD = 10050
+local PART_NUMBER = 10029
+local PATCH_MODE = 10028
+local DOUBLE_NUMBER = 10030
+local SPLIT_NUMBER = 10023
+local DUMMY_NUMBER = 10024
 
-local PARAMETER_IDS = {
-  VIRTUAL = {
-    PERFORMANCE_BEND_TYPE = 10,
-    PAN_WIDTH = 201,
-    MODE = 10028,
-    PART_SEL = 10029,
-    DOUBLE_SLOT = 10030,
-    SPLIT_SLOT = 10023,
-    STICKY_PARAM = 10024,
-    CURRENT_BANK = 6032,
-    PATCH_X_NUMBER = 6033,
-  },
-  NRPN = {
-    CONTROL_PORTAMENTO_SETTINGS = 7,
-    PERFORMANCE_SETTINGS = 129,
-    PERFORMANCE_PITCH_BEND_RANGE = 130,
-    PERFORMANCE_OCTAVE_TRANSPOSE = 131,
-    PERFORMANCE_LFO_RATE = 132,
-    PERFORMANCE_LFO_SHAPE = 133,
-    PERFORMANCE_LFO_DEPTH = 134,
-    PERFORMANCE_LFO_MODS = 135,
-    MODULATION_LFO_MODS = 261,
-    MODULATION_CHANNEL_1_SENDS = 263,
-    MODULATION_CHANNEL_1_MODS = 264,
-    MODULATION_CHANNEL_2_SENDS = 265,
-    MODULATION_CHANNEL_2_MODS = 266,
-    OSC_1_FREQUENCY = 513,
-    OSC_2_FREQUENCY = 515,
-    OSC_1_QUANTIZE = 535,
-    OSC_2_QUANTIZE = 536,
-    OSC_2_STATE = 516,
-    OSC_1_STATE = 517,
-    FILTER_MODS = 397,
-    AMP_MODS = 398,
-    FILTER_MODES = 644,
-    KEYBOARD_SPLIT_POINT = 1280,
-  },
-  VOICE_PAN_BASE = 2176,
-}
+-- nrpn parameter numbers
+local ATROPHY_NUMBER = 909
+local OSC_1 = 513
+local OSC_2 = 515
+local QUANT_1 = 535
+local QUANT_2 = 536
 
-local CONTROL_IDS = {
-  MIDI_TEMPO = 52,
-  SPLIT_BALANCE = 58,
-  OSC_2_FREQUENCY = 95,
-  SPLIT_SLOT_RESET = 116,
-  CUSTOM_BEND = 110,
-  SPLIT_UPPER_NAME = 166,
-  SPLIT_LOWER_NAME = 174,
-  PATCH_NAME = 209,
-  DOUBLE_UPPER_NAME = 216,
-  DOUBLE_LOWER_NAME = 226,
-  SHARED_MODE = 321,
-  SLOT_NAME_UPPER = 231,
-  SLOT_NAME_LOWER = 329,
-  OSC_1_FREQUENCY = 328,
-  POLY_VOICE = 48,
-  UNISON_VOICE = 53,
-  ATROPHY_NAME = 426,
-}
+-- control ids
+local CTRL_UPPER_DOUBLE = 216
+local CTRL_LOWER_DOUBLE = 226
+local CTRL_UPPER_SPLIT = 166
+local CTRL_LOWER_SPLIT = 174
+local CTRL_POLY_VOICES = 48
+local CTRL_UNISON_VOICES = 53
+local CTRL_POSITIVE_OCTAVES1 = 86
+local CTRL_POSITIVE_OCTAVES2 = 17
+local CTRL_OCTAVES1 = 326
+local CTRL_FREQ1 = 328
+local CTRL_FREQ2 = 95
 
-local VOICE_PAN_PARAMS = {}
-for offset = 0, 15 do
-  VOICE_PAN_PARAMS[#VOICE_PAN_PARAMS + 1] = PARAMETER_IDS.VOICE_PAN_BASE + offset
-end
+-- slot locations
+local TARGET_SD_SLOT1 = 26
+local TARGET_SD_SLOT2 = 27
+local TARGET_SD_PAGE = 1
+local TARGET_VOICE_SLOT = 20
+local TARGET_VOICE_PAGE = 4
+local TARGET_FREQ_SLOT1 = 1
+local TARGET_FREQ_SLOT2 = 7
+local TARGET_FREQ_PAGE = 4
 
 -- load the UB-Xa global settings when the preset is first loaded
 function preset.onLoad()
@@ -113,11 +84,7 @@ function preset.onReady()
   pages.display(1)
   getPatchNames(nil,1)
 end
-
--- ============================================================
--- UTILITIES
--- ============================================================
-
+-- helper to make sure bad control id numbers are called
 local function safeGet(id)
   local ok, c = pcall(controls.get, id)
   return ok and c or nil
@@ -149,7 +116,7 @@ local function applySynthChannels()
   if ubxaLowerCh ~= nil then lowerDevice:setChannel(ubxaLowerCh) end
   -- keep currentDevice in sync with selected part
   -- value mapping in your code: 0 = upper, 1 = lower
-  local partSel = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PART_SEL)
+  local partSel = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
   if partSel == 0 and ubxaUpperCh ~= nil then
     currentDevice:setChannel(ubxaUpperCh)
   elseif partSel == 1 and ubxaLowerCh ~= nil then
@@ -224,16 +191,11 @@ function displayChar (valueObject, value)
   return string.char(value)
 end
 
--- ============================================================
--- OSC QUANTIZER
--- ============================================================
-
--- Multi-osc quantizer, mode labels and value formatters for UB-Xa preset
+-- Osc quantizer, mode labels, and value formatters for UB-Xa preset
 -- Supports:
---  - freqQ1 : oscillator 1 editor Function (NRPN 513, quant param 535, control id 328)
---  - freqQ2 : oscillator 2 editor Function (NRPN 515, quant param 536, control id 95)
+--  - freqQ1 : oscillator 1 editor Function (NRPN OSC_1, quant param QUANT_1, control id CTRL_FREQ1)
+--  - freqQ2 : oscillator 2 editor Function (NRPN OSC_2, quant param QUANT_2, control id CTRL_FREQ2)
 --  - formatFreq1 / formatFreq2 as Value formatter functions to show human-friendly text
---
 -- Behavior:
 --  - Signed display domain: -8192 .. +8191 (but also accepts 0..16383 unsigned and converts)
 --  - Semitone interaction for octave modes (fine control), snaps final NRPN to exact octaves
@@ -352,34 +314,22 @@ local function normalizeIncomingToSigned(incoming)
   return clamp(incoming, SIGN_MIN, SIGN_MAX)
 end
 
-local function quantizeOscillator(valueObject, value, nrpnParam, quantParam, ctrlId)
+-- Osc 1: NRPN param OSC_1, quant param QUANT_1, control id CTRL_FREQ1 -> function name freqQ1
+function freqQ1(valueObject, value)
   local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
   local incoming = normalizeIncomingToSigned(raw_in)
-  local qRaw, n, mode = quantizeSignedFor(incoming, quantParam)
-  parameterMap.set(deviceId, PT_NRPN, nrpnParam, qRaw)
-  applyQuantResult(qRaw, n, mode, ctrlId, valueObject, quantParam)
+  local qRaw, n, mode = quantizeSignedFor(incoming, QUANT_1)
+  parameterMap.set(deviceId, PT_NRPN, OSC_1, qRaw)
+  applyQuantResult(qRaw, n, mode, CTRL_FREQ1, valueObject, QUANT_1)
 end
 
--- Osc 1: NRPN param 513, quant param 535, control id 328 -> function name freqQ1
-function freqQ1(valueObject, value)
-  quantizeOscillator(
-    valueObject,
-    value,
-    PARAMETER_IDS.NRPN.OSC_1_FREQUENCY,
-    PARAMETER_IDS.NRPN.OSC_1_QUANTIZE,
-    CONTROL_IDS.OSC_1_FREQUENCY
-  )
-end
-
--- Osc 2: NRPN param 515, quant param 536, control id 95 -> function name freqQ2
+-- Osc 2: NRPN param OSC_2, quant param QUANT_2, control id CTRL_FREQ2 -> function name freqQ2
 function freqQ2(valueObject, value)
-  quantizeOscillator(
-    valueObject,
-    value,
-    PARAMETER_IDS.NRPN.OSC_2_FREQUENCY,
-    PARAMETER_IDS.NRPN.OSC_2_QUANTIZE,
-    CONTROL_IDS.OSC_2_FREQUENCY
-  )
+  local raw_in = (value ~= nil) and value or (valueObject and (type(valueObject.getValue) == "function" and valueObject:getValue() or valueObject) or 0)
+  local incoming = normalizeIncomingToSigned(raw_in)
+  local qRaw, n, mode = quantizeSignedFor(incoming, QUANT_2)
+  parameterMap.set(deviceId, PT_NRPN, OSC_2, qRaw)
+  applyQuantResult(qRaw, n, mode, CTRL_FREQ2, valueObject, QUANT_2)
 end
 
 -- helper function for making osc1 and osc2 frequency format
@@ -402,203 +352,174 @@ local function formatFreqCommon(value, quantParam)
 end
 
 function formatFreq1(valueObject, value)
-  return formatFreqCommon(value, PARAMETER_IDS.NRPN.OSC_1_QUANTIZE)
+  return formatFreqCommon(value, QUANT_1)
 end
 
 function formatFreq2(valueObject, value)
-  return formatFreqCommon(value, PARAMETER_IDS.NRPN.OSC_2_QUANTIZE)
+  return formatFreqCommon(value, QUANT_2)
 end
 
 -- format midi tempo value display
 function showMidiTempo(valueObject,value)
-  controls.get(CONTROL_IDS.MIDI_TEMPO):setVisible(value == 0)
+  if value == 0 then
+    controls.get (52):setVisible (true)
+  else
+    controls.get (52):setVisible (false)
+  end
 end
 
 ---- value formater functions ----
-local function formatValue(value, config)
-  local numeric = tonumber(value) or 0
-  if config.transform then
-    numeric = config.transform(numeric)
-  end
-  if config.scale then
-    numeric = numeric * config.scale
-  end
-  if config.offset then
-    numeric = numeric + config.offset
-  end
-  return string.format(config.pattern, numeric)
-end
-
-local function buildValueFormatter(config)
-  return function(valueObject, value)
-    return formatValue(value, config)
-  end
-end
-
-local function formatDirectionalValue(valueObject, value, config)
-  local control = valueObject:getControl():getId()
-  local side = config.negativeLabel
-  local color = config.negativeColor
-
-  if value == 0 then
-    side = config.zeroLabel
-    color = config.zeroColor
-  elseif value > 0 then
-    side = config.positiveLabel
-    color = config.positiveColor
-  end
-
-  controls.get(control):setColor(color)
-
-  local magnitude = config.useFloor and math.abs(math.floor(value)) or math.abs(value)
-  return string.format("%.0f%%", 100 * magnitude / config.divisor) .. side
-end
-
-local function buildDirectionalFormatter(config)
-  return function(valueObject, value)
-    return formatDirectionalValue(valueObject, value, config)
-  end
-end
-
 -- format per voice Pan
-fmtPan = buildDirectionalFormatter({
-  divisor = 128,
-  useFloor = true,
-  negativeLabel = " L",
-  zeroLabel = " Center",
-  positiveLabel = " R",
-  negativeColor = WHITE,
-  zeroColor = 26 * 256 * 256 + 200 * 256 + 30,
-  positiveColor = RED,
-})
+function fmtPan(valueObject,value)
+  local control = valueObject:getControl():getId()
+  local side =" L"
+  if (value < 0 ) then 
+    controls.get(control):setColor (WHITE)
+  elseif (value == 0) then
+    side = " Center"
+    controls.get(control):setColor (26 *256*256 + 200*256 + 30)
+  elseif (value > 0) then
+    side = " R"
+    controls.get(control):setColor (RED)
+  end
+  return(string.format ("%.0f%%",100*(math.abs(math.floor(value)))/128) .. side)
+end
 
 -- format master output Pan
-fmtMasterPan = buildDirectionalFormatter({
-  divisor = 64,
-  useFloor = true,
-  negativeLabel = " L",
-  zeroLabel = " Center",
-  positiveLabel = " R",
-  negativeColor = BLUE,
-  zeroColor = WHITE,
-  positiveColor = RED,
-})
+function fmtMasterPan(valueObject,value)
+  local control = valueObject:getControl():getId()
+  local side =" L"
+  if (value < 0 ) then 
+    controls.get(control):setColor (BLUE)
+  elseif (value == 0) then
+    side = " Center"
+    controls.get(control):setColor (WHITE)
+  elseif (value > 0) then
+    side = " R"
+    controls.get(control):setColor (RED)
+  end
+  return(string.format ("%.0f%%",100*(math.abs(math.floor(value)))/64) .. side)
+end
 
 -- format split/double Balance
-fmtBalance = buildDirectionalFormatter({
-  divisor = 128,
-  negativeLabel = " >> LOWER",
-  zeroLabel = " EQUAL",
-  positiveLabel = " >> UPPER",
-  negativeColor = WHITE,
-  zeroColor = GREEN,
-  positiveColor = RED,
-})
+function fmtBalance(valueObject,value)
+  local control = valueObject:getControl():getId()
+  local side =" >> LOWER"
+  if (value < 0 ) then 
+    controls.get(control):setColor (WHITE)
+  elseif (value == 0) then
+    side = " EQUAL"
+    controls.get(control):setColor (GREEN)
+  elseif (value > 0) then
+    side = " >> UPPER"
+    controls.get(control):setColor (RED)
+  end
+  return(string.format ("%.0f%%",100*(math.abs(value))/128) .. side)
+end
 
-percentage255 = buildValueFormatter({
-  pattern = "%.2f%%",
-  transform = function(v) return 100 * (v - 128) / 255 end,
-})
-addPercentage63 = buildValueFormatter({
-  pattern = "%.1f%%",
-  transform = function(v) return v / 0.63 end,
-})
-addPercentage255 = buildValueFormatter({
-  pattern = "%.1f%%",
-  transform = function(v) return v / 2.55 end,
-})
-addPercentage127 = buildValueFormatter({
-  pattern = "%.1f%%",
-  transform = function(v) return v / 1.27 end,
-})
-addPercentage100 = buildValueFormatter({
-  pattern = "%.1f%%",
-})
-addPercentage10 = buildValueFormatter({
-  pattern = "%.1f%%",
-  transform = function(v) return v / 10 end,
-})
-times32 = buildValueFormatter({
-  pattern = "%.1f units",
-  transform = function(v) return (v / 31) * 32 end,
-})
-convertToPhase = buildValueFormatter({
-  pattern = "%d degr.",
-})
-divide4 = buildValueFormatter({
-  pattern = "%.1f",
-  transform = function(v) return v / 4 end,
-})
-semitones128 = buildValueFormatter({
-  pattern = "%i semitones",
-  offset = -128,
-})
-semitones64 = buildValueFormatter({
-  pattern = "%i semitones",
-  offset = -64,
-})
-semitones8 = buildValueFormatter({
-  pattern = "%.2f semitones",
-  transform = function(v) return v / 8 end,
-})
-semitones = buildValueFormatter({
-  pattern = "%d semitones",
-})
-cents = buildValueFormatter({
-  pattern = "%d cents",
-})
-trackOffset = buildValueFormatter({
-  pattern = "%d semitones",
-  transform = function(v) return -v end,
-})
-toHertz1 = buildValueFormatter({
-  pattern = "%.2f HZ",
-  transform = function(v) return (2 ^ ((v - 255) / 27.63083863)) * 60 end,
-})
-toHertz2 = buildValueFormatter({
-  pattern = "%.2f HZ",
-  transform = function(v) return (2 ^ ((v - 69) / 12)) * 440 end,
-})
-centPOct1 = buildValueFormatter({
-  pattern = "%.2f c/Oct",
-  transform = function(v) return ((v - 16) / 32) * 12.5 end,
-})
-centPOct2 = buildValueFormatter({
-  pattern = "%.2f c/Oct",
-  transform = function(v) return (v / 63) * 12.5 end,
-})
-centPOct3 = buildValueFormatter({
-  pattern = "%.2f c/Oct",
-  transform = function(v) return (v / 63) * 50 end,
-})
-centPOct4 = buildValueFormatter({
-  pattern = "%.2f c/Oct",
-  transform = function(v) return ((v - 32) / 63) * 100 end,
-})
-driftSpeed = buildValueFormatter({
-  pattern = "%.2f p/s",
-  transform = function(v) return (v / 63) * 61.5 end,
-})
-oscDrift = buildValueFormatter({
-  pattern = "%.2f c",
-  transform = function(v) return (v / 63) * 100 end,
-})
-filterDrift = buildValueFormatter({
-  pattern = "%.2f c",
-  transform = function(v) return (v / 63) * 400 end,
-})
-twoPoleTrim = buildValueFormatter({
-  pattern = "%.2f pct",
-  transform = function(v) return ((v + 257) / 512) * 100 end,
-})
-fourPoleTrim = buildValueFormatter({
-  pattern = "%.2f%%",
-  transform = function(v) return (v / 255) * 100 end,
-})
-linear = buildValueFormatter({
-  pattern = "%.2f%%",
-  transform = function(v) return v / 16 end,
-})
+-- Add % sign
+function percentage255 (valueObject, value)
+    return (string.format ("%.2f%%", 100*(value-128)/255))
+end
+function addPercentage63 (valueObject, value)
+    return (string.format ("%.1f%%", value/0.63))
+end
+function addPercentage255 (valueObject, value)
+    return (string.format ("%.1f%%", value/2.55))
+end
+function addPercentage127 (valueObject, value)
+    return (string.format ("%.1f%%", value/1.27))
+end
+function addPercentage100 (valueObject, value)
+    return (string.format ("%.1f%%", value))
+end
+function addPercentage10 (valueObject, value)
+    return (string.format ("%.1f%%", value/10))
+end
+-- scale by 32
+function times32(valueObject, value)
+    return (string.format ("%.1f units", (value/31)*32))
+end
+-- Add degrees sign
+function convertToPhase(valueObject, value)
+    return (string.format ("%d degr.", value))
+end
+-- Add divide by 4
+function divide4(valueObject, value)
+    return (string.format ("%.1f", value/4))
+end
+-- Add semitones, scaled to 128 = 0
+function semitones128 (valueObject, value)
+    return (string.format ("%i semitones", value-128))
+end
+-- Add semitones, scaled to 64 = 0
+function semitones64 (valueObject, value)
+    return (string.format ("%i semitones", value-64))
+end
+-- Add semitones, divided by 8
+function semitones8 (valueObject, value)
+    return (string.format ("%.2f semitones", value/8))
+end
+-- Add semitones
+function semitones (valueObject, value)
+    return (string.format ("%d semitones", value))
+end
+-- Add cents 
+function cents (valueObject, value)
+    return (string.format ("%d cents", value))
+end
+-- atrophy parameter formats from sysex guide
+function trackOffset (valueObject, value)
+    return (string.format ("%d semitones", -value))
+end
+function toHertz1 (valueObject, value)
+  local x = (2^((value-255)/27.63083863))*60
+    return (string.format ("%.2f HZ", x))
+end
+function toHertz2 (valueObject, value)
+  local x = (2^((value-69)/12))*440
+    return (string.format ("%.2f HZ", x))
+end
+function centPOct1(valueObject,value)
+  local x = ((value-16)/32)*12.5
+    return (string.format ("%.2f c/Oct", x))
+end
+function centPOct2(valueObject,value)
+  local x = (value/63)*12.5
+    return (string.format ("%.2f c/Oct", x))
+end
+function centPOct3(valueObject,value)
+  local x = (value/63)*50
+    return (string.format ("%.2f c/Oct", x))
+end
+function centPOct4(valueObject,value)
+  local x = ((value-32)/63)*100
+    return (string.format ("%.2f c/Oct", x))
+end
+function driftSpeed(valueObject,value)
+  local x = (value/63)*61.5
+    return (string.format ("%.2f p/s", x))
+end
+function oscDrift(valueObject,value)
+  local x = (value/63)*100
+    return (string.format ("%.2f c", x))
+end
+function filterDrift(valueObject,value)
+  local x = (value/63)*400
+    return (string.format ("%.2f c", x))
+end
+function twoPoleTrim(valueObject,value)
+  local x = ((value+257)/512)*100
+    return (string.format ("%.2f pct", x))
+end
+function fourPoleTrim(valueObject,value)
+  local x = ((value)/255)*100
+    return (string.format ("%.2f%%", x))
+end
+function linear (valueObject, value)
+    local x = (value)/16
+    return (string.format ("%.2f%%", x))
+end
 
 -- HELP_TEXTS: keyed table for fast lookup in events.onPotTouchChange
 local HELP_TEXTS = {
@@ -777,10 +698,6 @@ function events.onPotTouchChange(potId, controlId, touched)
   if help then showHelp(help) end
 end
 
--- ============================================================
--- UI / MODE SWITCHING
--- ============================================================
-
 local function resetVirtualAndControl(paramId, ctrlId)
   parameterMap.set(deviceId, PT_VIRTUAL, paramId, 0)
   local c = safeGet(ctrlId)
@@ -792,30 +709,30 @@ end
 -- display function for patch mode setting values
 function patchMode(valueObject, value)
   -- track previous mode and reset sticky params on transition
-  local prevMode = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.MODE)
+  local prevMode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
   -- write the new mode first so downstream reads see current state
-  parameterMap.set(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.MODE, value)
+  parameterMap.set(deviceId, PT_VIRTUAL, PATCH_MODE, value)
   -- clear sticky params on BOTH directions
   if prevMode ~= nil and prevMode ~= value then
-    -- transitions between 0 and 1 => reset double selection + sticky tracking
+    -- transitions between 0 and 1 => reset DOUBLE_NUMBER + its control
     if (prevMode == 0 and value == 1) or (prevMode == 1 and value == 0) then
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.DOUBLE_SLOT, CONTROL_IDS.DOUBLE_UPPER_NAME)
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.STICKY_PARAM, CONTROL_IDS.DOUBLE_LOWER_NAME)
+      resetVirtualAndControl(DOUBLE_NUMBER, 216)
+      resetVirtualAndControl(DUMMY_NUMBER, 226)
     end
-    -- transitions between 1 and 2 => reset split selection + sticky tracking
+    -- transitions between 1 and 2 => reset SPLIT_NUMBER + its control
     if (prevMode == 1 and value == 2) or (prevMode == 2 and value == 1) then
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.SPLIT_SLOT, CONTROL_IDS.SPLIT_SLOT_RESET)
-      resetVirtualAndControl(PARAMETER_IDS.VIRTUAL.STICKY_PARAM, CONTROL_IDS.SPLIT_LOWER_NAME)
+      resetVirtualAndControl(SPLIT_NUMBER, 116)
+      resetVirtualAndControl(DUMMY_NUMBER, 174)
     end
   end
   local visibilityMap = {
-    [0] = { show = {}, hide = {CONTROL_IDS.DOUBLE_UPPER_NAME, CONTROL_IDS.DOUBLE_LOWER_NAME, CONTROL_IDS.SPLIT_UPPER_NAME, CONTROL_IDS.SPLIT_LOWER_NAME, CONTROL_IDS.SHARED_MODE, CONTROL_IDS.SPLIT_BALANCE, CONTROL_IDS.SLOT_NAME_UPPER, CONTROL_IDS.SLOT_NAME_LOWER} },
-    [1] = { show = {CONTROL_IDS.DOUBLE_UPPER_NAME, CONTROL_IDS.DOUBLE_LOWER_NAME, CONTROL_IDS.SHARED_MODE, CONTROL_IDS.SLOT_NAME_UPPER, CONTROL_IDS.SLOT_NAME_LOWER}, hide = {CONTROL_IDS.SPLIT_BALANCE, CONTROL_IDS.SPLIT_UPPER_NAME, CONTROL_IDS.SPLIT_LOWER_NAME} },
-    [2] = { show = {CONTROL_IDS.SPLIT_UPPER_NAME, CONTROL_IDS.SPLIT_LOWER_NAME, CONTROL_IDS.SPLIT_BALANCE, CONTROL_IDS.SHARED_MODE, CONTROL_IDS.SLOT_NAME_UPPER, CONTROL_IDS.SLOT_NAME_LOWER}, hide = {CONTROL_IDS.DOUBLE_UPPER_NAME, CONTROL_IDS.DOUBLE_LOWER_NAME} },
+    [0] = { show = {}, hide = {216,226,166,174,321,58,231,329} },
+    [1] = { show = {216,226,321,231,329}, hide = {58,166,174} },
+    [2] = { show = {166,174,58,321,231,329}, hide = {216,226} },
   }
   if visibilityMap[value] then
-    if value == 0 then
-      parameterMap.set(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PART_SEL, 0)
+    if value == 0 then -- single mode
+      parameterMap.set(deviceId, PT_VIRTUAL, PART_NUMBER, 0)
       SD_FLAG = 0 -- split/double flag off
     end
     local config = visibilityMap[value]
@@ -826,19 +743,12 @@ function patchMode(valueObject, value)
       local c = safeGet(id); if c then c:setVisible(true) end
     end
   end
-  local TARGET_SLOT1 = 26
-  local TARGET_SLOT2 = 27
-  local TARGET_PAGE = 1
-  local c216  = controls.get(CONTROL_IDS.DOUBLE_UPPER_NAME)
-  local c226 = controls.get(CONTROL_IDS.DOUBLE_LOWER_NAME)
-  local c166  = controls.get(CONTROL_IDS.SPLIT_UPPER_NAME)
-  local c174 = controls.get(CONTROL_IDS.SPLIT_LOWER_NAME)
   if value == 1 then
-    c216:setSlot(TARGET_SLOT1, TARGET_PAGE)
-    c226:setSlot(TARGET_SLOT2, TARGET_PAGE)
+    controls.get(CTRL_UPPER_DOUBLE):setSlot(TARGET_SD_SLOT1, TARGET_SD_PAGE)
+    controls.get(CTRL_LOWER_DOUBLE):setSlot(TARGET_SD_SLOT2, TARGET_SD_PAGE)
   elseif value == 2 then
-    c166:setSlot(TARGET_SLOT1, TARGET_PAGE)
-    c174:setSlot(TARGET_SLOT2, TARGET_PAGE)
+    controls.get(CTRL_UPPER_SPLIT):setSlot(TARGET_SD_SLOT1, TARGET_SD_PAGE)
+    controls.get(CTRL_LOWER_SPLIT):setSlot(TARGET_SD_SLOT2, TARGET_SD_PAGE)
   end
   -- force redraw after resets + visibility changes
   displaySD(nil, 0)
@@ -847,39 +757,40 @@ end
 
 -- show unison voice or poly voice depending on value of unison toggle
 function swapVoiceType(valueObject, value)
-  local TARGET_SLOT = 20
-  local TARGET_PAGE = 4
-  local c48  = controls.get(CONTROL_IDS.POLY_VOICE)
-  local c53 = controls.get(CONTROL_IDS.UNISON_VOICE)
   if value == 0 then
-    c48:setSlot(TARGET_SLOT, TARGET_PAGE) -- move control 48 into page 4, slot 11
+    controls.get(CTRL_POLY_VOICES):setSlot(TARGET_VOICE_SLOT, TARGET_VOICE_PAGE) -- move control 48 into page 4, slot 11
   else
-    c53:setSlot(TARGET_SLOT, TARGET_PAGE) -- move control 53 into same page and slot
+    controls.get(CTRL_UNISON_VOICES):setSlot(TARGET_VOICE_SLOT, TARGET_VOICE_PAGE) -- move control 53 into same page and slot
   end
+end
+
+-- show octave or frequency control depending on value of quantification parameter
+function quantFreq1(valueObject, value)
+  controls.get(CTRL_FREQ1):setSlot(TARGET_FREQ_SLOT1, TARGET_FREQ_PAGE)
+end
+
+-- show octave or frequency control depending on value of quantification parameter
+function quantFreq2(valueObject, value)
+  controls.get(CTRL_FREQ2):setSlot(TARGET_FREQ_SLOT2, TARGET_FREQ_PAGE)
 end
 
 function displaySD(valueObject, value)
   local BANK_NAMES = {"A","B","C","D"}
-  local CTRL_UPPER_NAME_SINGLE = CONTROL_IDS.SPLIT_UPPER_NAME
-  local CTRL_LOWER_NAME_SINGLE = CONTROL_IDS.SPLIT_LOWER_NAME
-  local CTRL_UPPER_NAME_DOUBLE = CONTROL_IDS.DOUBLE_UPPER_NAME
-  local CTRL_LOWER_NAME_DOUBLE = CONTROL_IDS.DOUBLE_LOWER_NAME
-  local mode = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.MODE)
+  local mode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
   -- reset sticky params on specific mode transitions (both directions)
   if lastDisplaySDMode ~= nil and mode ~= nil and lastDisplaySDMode ~= mode then
-    -- between 0 and 1: always clear double selection + sticky tracking
+    -- between 0 and 1: always clear DOUBLE_NUMBER/DUMMY_NUMBER
     if (lastDisplaySDMode == 0 and mode == 1) or (lastDisplaySDMode == 1 and mode == 0) then
-      parameterMap.set(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.DOUBLE_SLOT, 0)
-      parameterMap.set(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.STICKY_PARAM, 0)
+      parameterMap.set(deviceId, PT_VIRTUAL, DOUBLE_NUMBER, 0)
+      parameterMap.set(deviceId, PT_VIRTUAL, DUMMY_NUMBER, 0)
     end
-    -- between 1 and 2: always clear split selection + sticky tracking
+    -- between 1 and 2: always clear SPLIT_NUMBER/DUMMY_NUMBER
     if (lastDisplaySDMode == 1 and mode == 2) or (lastDisplaySDMode == 2 and mode == 1) then
-      parameterMap.set(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.SPLIT_SLOT, 0)
-      parameterMap.set(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.STICKY_PARAM, 0)
+      parameterMap.set(deviceId, PT_VIRTUAL, SPLIT_NUMBER, 0)
+      parameterMap.set(deviceId, PT_VIRTUAL, DUMMY_NUMBER, 0)
     end
   end
   lastDisplaySDMode = mode
-
   if not mode or mode == 0 then return end   -- nothing to show in single mode
   local baseIndex
   if mode == 2 then
@@ -889,7 +800,6 @@ function displaySD(valueObject, value)
   else
     return
   end
-
   -- validate sdMatrix row exists
   local row = sdMatrix[baseIndex]
   if not row then return end
@@ -900,8 +810,8 @@ function displaySD(valueObject, value)
   local lb = math.floor((row[4] or 0) + 1)
   -- pick controls based on which half we're updating
   local isFirstHalf = baseIndex >= 1 and baseIndex < 37
-  local ctrlUpper = isFirstHalf and CTRL_UPPER_NAME_SINGLE or CTRL_UPPER_NAME_DOUBLE
-  local ctrlLower = isFirstHalf and CTRL_LOWER_NAME_SINGLE or CTRL_LOWER_NAME_DOUBLE
+  local ctrlUpper = isFirstHalf and CTRL_UPPER_SPLIT or CTRL_UPPER_DOUBLE
+  local ctrlLower = isFirstHalf and CTRL_LOWER_SPLIT or CTRL_LOWER_DOUBLE
   -- set upper patch name if available
   if nameBank and nameBank[ub] and nameBank[ub][up] then
     local displayName = BANK_NAMES[ub] .. tostring(up) .. " " .. (nameBank[ub][up] or "")
@@ -913,12 +823,12 @@ function displaySD(valueObject, value)
   end
   -- parameter mappings (unified table: {targetParam, srcIndex, multiplier})
   local param_map = {
-    {PARAMETER_IDS.NRPN.PERFORMANCE_PITCH_BEND_RANGE, 8, 64},
-    {PARAMETER_IDS.NRPN.PERFORMANCE_OCTAVE_TRANSPOSE, 9, 64},
-    {PARAMETER_IDS.NRPN.PERFORMANCE_LFO_DEPTH, 10, 64},
-    {PARAMETER_IDS.NRPN.PERFORMANCE_LFO_RATE, 11, 64},
-    {PARAMETER_IDS.NRPN.KEYBOARD_SPLIT_POINT, 6, 1},
-    {PARAMETER_IDS.NRPN.PERFORMANCE_LFO_SHAPE, 12, 1},
+    {130, 8, 64},   -- Performance pitch bend range (/64)
+    {131, 9, 64},   -- Performance octave pitch transpose (/64)
+    {134, 10, 64},  -- Performance LFO depth (/64)
+    {132, 11, 64},  -- Performance LFO rate (/64)
+    {1280, 6, 1},   -- Performance keyboard split point
+    {133, 12, 1},   -- Performance LFO shape
   }
   for _, m in ipairs(param_map) do
     local srcVal = row[m[2]] or 0
@@ -934,17 +844,17 @@ function displaySD(valueObject, value)
   end
 end
 
--- ============================================================
--- PANNING
--- ============================================================
-
 -- panning control parameter
 function setPanType(valueObject, type)
   if type == nil then return end
-  local widthControl = math.min(parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PAN_WIDTH),100)
+  local widthControl = math.min(parameterMap.get(deviceId, PT_VIRTUAL,201),100)
+  local paramList = {
+    2176,2177,2178,2179,2180,2181,2182,2183,
+    2184,2185,2186,2187,2188,2189,2190,2191
+  }
   local value = 0
   local steps = {0, 85, 170, 255}
-  for i, param in ipairs(VOICE_PAN_PARAMS) do
+  for i, param in ipairs(paramList) do  
     if     type == 0 then value = 128 --  center all (128);
     elseif type == 1 then value = (i % 2 == 1) and 0 or 255 -- alternate left/right: odd indices -> 0, even indices -> 255   
     elseif type == 2 then value = steps[((i - 1) % 4) + 1] -- four-step pan groups: 0, 64, 192, 255 repeating every 4 voices
@@ -956,8 +866,12 @@ function setPanType(valueObject, type)
 end 
 
 function setPanWidth(valueObject, value)
-  local widthControl = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PAN_WIDTH)
-  for i, param in ipairs(VOICE_PAN_PARAMS) do
+  local widthControl = parameterMap.get(deviceId, PT_VIRTUAL,201)
+  local paramList = {
+    2176,2177,2178,2179,2180,2181,2182,2183,
+    2184,2185,2186,2187,2188,2189,2190,2191
+  }
+  for i, param in ipairs(paramList) do
     --print ("i : "..i..", param;"..param.." panDefValue[i]: "..panDefValue[i].." widthControl: "..widthControl)
     parameterMap.set(deviceId, PT_NRPN, param, math.max(math.min(math.floor(128+(panDefValue[i]-128)*widthControl/100),255),0))   
   end
@@ -965,12 +879,8 @@ end
 
 function setPanDefault(valueObject, value)
   local parameterNumber = valueObject:getMessage ():getParameterNumber ()
-  panDefValue[parameterNumber + 1 - PARAMETER_IDS.VOICE_PAN_BASE] = value + 128
+  panDefValue[parameterNumber+1-2176] = value+128
 end
-
--- ============================================================
--- BITMASK FUNCTIONS
--- ============================================================
 
 -- bitmask helper function ---
 function sendBitmask(paramNumber, deviceId, paramList)
@@ -988,66 +898,67 @@ function sendBitmask(paramNumber, deviceId, paramList)
   midi.sendControlChange(currentPort, currentChannel, 99, pMSB)
   midi.sendControlChange(currentPort, currentChannel, 98, pLSB)
   midi.sendControlChange(currentPort, currentChannel, 6, vMSB)
- midi.sendControlChange(currentPort, currentChannel, 38, vLSB)
+  midi.sendControlChange(currentPort, currentChannel, 38, vLSB)
 end
 
-local BITMASK_CONFIGS = {
- [PARAMETER_IDS.NRPN.CONTROL_PORTAMENTO_SETTINGS] = { params = {54,60,59,65} },
- [PARAMETER_IDS.NRPN.PERFORMANCE_SETTINGS] = {
-   params = {8,10,19,97,103,109},
-   after = function()
-     local bendType = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PERFORMANCE_BEND_TYPE)
-     controls.get(CONTROL_IDS.CUSTOM_BEND):setVisible(bendType == 1)
-   end,
- },
- [PARAMETER_IDS.NRPN.PERFORMANCE_LFO_MODS] = { params = {117,118,119} },
- [PARAMETER_IDS.NRPN.MODULATION_LFO_MODS] = { params = {37,38,39,40} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_SENDS] = { params = {50,51,27} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_MODS] = { params = {30,31} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_SENDS] = { params = {33,35,44} },
- [PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_MODS] = { params = {49,46} },
- [PARAMETER_IDS.NRPN.FILTER_MODS] = { params = {136,137,138,139,140} },
- [PARAMETER_IDS.NRPN.AMP_MODS] = { params = {141,142,143,144,145} },
- [PARAMETER_IDS.NRPN.OSC_2_STATE] = { params = {2,9} },
- [PARAMETER_IDS.NRPN.OSC_1_STATE] = { params = {3,154,155} },
- [PARAMETER_IDS.NRPN.FILTER_MODES] = { params = {76,89} },
-}
-
-local function applyBitmaskConfig(paramNumber)
- local config = BITMASK_CONFIGS[paramNumber]
- if not config then return end
-
- sendBitmask(paramNumber, deviceId, config.params)
- if config.after then
-   config.after()
- end
+function bitMask007(valueObject,value) -- NRPN 0/7 = 7 ControlPortamentoSettings 
+-- Bitmask: Match (0001) Quantize (0010) Bend (0100) Exponential (1000)
+  sendBitmask(7, deviceId, {54,60,59,65})
 end
-
-local BITMASK_FUNCTIONS = {
- bitMask007 = PARAMETER_IDS.NRPN.CONTROL_PORTAMENTO_SETTINGS,
- bitMask101 = PARAMETER_IDS.NRPN.PERFORMANCE_SETTINGS,
- bitMask107 = PARAMETER_IDS.NRPN.PERFORMANCE_LFO_MODS,
- bitMask205 = PARAMETER_IDS.NRPN.MODULATION_LFO_MODS,
- bitMask207 = PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_SENDS,
- bitMask208 = PARAMETER_IDS.NRPN.MODULATION_CHANNEL_1_MODS,
- bitMask209 = PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_SENDS,
- bitMask210 = PARAMETER_IDS.NRPN.MODULATION_CHANNEL_2_MODS,
- bitMask313 = PARAMETER_IDS.NRPN.FILTER_MODS,
- bitMask314 = PARAMETER_IDS.NRPN.AMP_MODS,
- bitMask404 = PARAMETER_IDS.NRPN.OSC_2_STATE,
- bitMask405 = PARAMETER_IDS.NRPN.OSC_1_STATE,
- bitMask504 = PARAMETER_IDS.NRPN.FILTER_MODES,
-}
-
-for functionName, paramNumber in pairs(BITMASK_FUNCTIONS) do
- _G[functionName] = function(valueObject, value)
-   applyBitmaskConfig(paramNumber)
- end
+function bitMask101(valueObject,value) -- NRPN 1/1 = 129 PerformanceSettings 
+-- Bitmask: Bend Osc2 only~Bend Osc1&Osc2 (000001) Custombend~Bend +/-2 (000010) OSC1 (000100) OSC2 (001000) Upper (010000) Lower (100000)
+  sendBitmask(129, deviceId, {8,10,19,97,103,109}) 
+  local bendType = parameterMap.get(deviceId, PT_VIRTUAL, 10)
+  if bendType == 0 then
+    controls.get (110):setVisible (false)
+  elseif bendType == 1 then
+    controls.get (110):setVisible (true)
+  end
 end
-
--- ============================================================
--- PATCH SELECTION
--- ============================================================
+function bitMask107(valueObject,value) -- NRPN 1/7 = 135 PerformanceLFOMods 
+-- Bitmask: Track (0001) Envelope (0010) TempoLock (0100) LFOTrig (1000)
+  sendBitmask(135, deviceId, {117,118,119}) 
+end
+function bitMask205(valueObject,value) -- NRPN 2/5 = 261 ModulationLFOMods 
+-- Bitmask: LFO Track on~LFO Track off (0001) LFOEnv2 Rate on~LFOEnv2 Rate off (0010) TempoLock (0100) LFOTrig (1000)
+  sendBitmask(261, deviceId, {37,38,39,40}) 
+end
+function bitMask207(valueObject,value) -- NRPN 2/7 = 263 ModulationChannel1Sends 
+-- Bitmask: C1 OSC1 LFO on~C1 OSC1 LFO off (001) C1 OSC2 LFO on~C1 OSC2 LFO off (010) C1 Flt LFO on~C1 Flt LFO off (100)
+  sendBitmask(263, deviceId, {50,51,27}) 
+end
+function bitMask208(valueObject,value) -- NRPN 2/8 = 264 ModulationChannel1Mods 
+-- Bitmask: C1 Quant on~C1 Quant off (01) LFOEnv1 Inv on~LFOEnv1 Inv off (10)
+  sendBitmask(264, deviceId, {30,31}) 
+end
+function bitMask209(valueObject,value) -- NRPN 2/9 = 265 ModulationChannel2Sends 
+-- Bitmask: C2 PWM1 LFO on~C2 PWM1 LFO off (001) C2 PWM2 LFO on~C2 PWM2 LFO off (010) C2 Vol LFO on~C2 Vol LFO off (100)
+  sendBitmask(265, deviceId, {33,35,44}) 
+end
+function bitMask210(valueObject,value) -- NRPN 2/10 = 266 ModulationChannel2Mods 
+-- Bitmask: C2 Quant on~C2 Quant off (01) LFOEnv2 Inv on~LFOEnv2 Inv off (10)
+  sendBitmask(266, deviceId, {49,46}) 
+end
+function bitMask313(valueObject,value) -- NRPN 3/13 = 397 EnvelopesFilterMods 
+-- Bitmask: Flip (00001) Repeat (00010) Retrig (00100) Loop (01000) Legato (10000)
+  sendBitmask(397, deviceId, {136,137,138,139,140}) 
+end
+function bitMask314(valueObject,value) -- NRPN 3/14 = 398 EnvelopesLoudnessMods 
+-- Bitmask: Flip (00001) Repeat (00010) Retrig (00100) Loop (01000) Legato (10000)
+  sendBitmask(398, deviceId, {141,142,143,144,145}) 
+end
+function bitMask404(valueObject,value) -- NRPN 4/4 = 516 ModulationChannel1Mods 
+-- Bitmask: OSC2 sync on~OSC2 sync off (01) OSC2 f-env on~OSC2 f-env off (10)
+  sendBitmask(516, deviceId, {2,9}) 
+end
+function bitMask405(valueObject,value) -- NRPN 4/5 = 517 OscillatorsOSC1State
+-- Bitmask: OSC1 full~OSC1 off (001) OSC1 VCO LFO 180~OSC1 VCO LFO 0 (010) OSC1 PWM LFO 180~OSC1 PWM LFO 0 (100)
+  sendBitmask(517, deviceId, {3,154,155}) 
+end
+function bitMask504(valueObject,value) -- NRPN 5/4 = 644 FilterModes 
+-- Bitmask: Filter track on~Filter track off (01) 4 pole filter~2 pole filter (10)
+  sendBitmask(644, deviceId, {76,89}) 
+end
 
 -- helper function to extract ascii bytes from a number
 local function asciiBytesFromNumber(n, width)
@@ -1055,12 +966,6 @@ local function asciiBytesFromNumber(n, width)
   local bytes = {}
   for i=1,#s do bytes[#bytes+1] = string.byte(s,i) end
   return bytes
-end
-
-local function appendSequentialMappings(mappings, params, startIndex)
-  for index, param in ipairs(params) do
-    mappings[#mappings + 1] = {param, startIndex + index - 1}
-  end
 end
 
 -- patch select program change functions -----------------------------------------------------------------------------------------------------------
@@ -1077,8 +982,8 @@ function selectIt(valueObject, value)
   print (string.format("selecting patch: Bank = %d, Prog = %d, Channel = %d", bankLSB, progNum, currentChannel))
   midi.sendControlChange(currentPort , currentChannel , 32, bankLSB)
   midi.sendProgramChange(currentPort , currentChannel , progNum)
-  local mode = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.MODE)
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PART_SEL)
+  local mode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
+  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
   if mode > 0 and part == 0 then
     sdMatrix[1][1] = progNum
     sdMatrix[1][2] = bankLSB
@@ -1100,13 +1005,13 @@ function selectSD(valueObject, value)
   local message = valueObject:getMessage ()
   local parameterNumber = message:getParameterNumber ()
   local messageValue = message:getValue ()
-  local mode = parameterMap.get (deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.MODE)
+  local mode = parameterMap.get (deviceId, PT_VIRTUAL, PATCH_MODE)
   local v = 0
   if mode == 0 then return
   elseif mode == 1 then  
-    v = parameterMap.get (deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.DOUBLE_SLOT) + 1 -- only can load 35 stored doubles
+    v = parameterMap.get (deviceId, PT_VIRTUAL, DOUBLE_NUMBER) + 1 -- only can load 35 stored doubles
   elseif mode == 2 then  
-    v = parameterMap.get (deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.SPLIT_SLOT) + 1 -- only can load 35 stored splits
+    v = parameterMap.get (deviceId, PT_VIRTUAL, SPLIT_NUMBER) + 1 -- only can load 35 stored splits
   end
   local bankLSB = {sdMatrix[v][2],sdMatrix[v][4]}
   local progNum = {sdMatrix[v][1],sdMatrix[v][3]}
@@ -1120,16 +1025,12 @@ end
 
 function displayPatch (valueObject, value)
   local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
-  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.CURRENT_BANK)+1
-  controls.get(CONTROL_IDS.PATCH_NAME):setName(nameBank[bankNum][value])  -- display loaded patch names stored in nameBank
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
+  controls.get (209):setName(nameBank[bankNum][value])  -- display loaded patch names stored in nameBank
   return (string.format(bankTxt[bankNum]).." "..string.format("%03d",value))
 end
 
 --- requests to UB-Xa for data dumps ---
--- ============================================================
--- MIDI DUMP REQUESTS
--- ============================================================
-
 -- Current program data
 function getCurrentProgram(valueObject, value)
   if value == 0 then return end
@@ -1160,13 +1061,13 @@ end
 -- either upper or lower patch data
 function getPatch(valueObject, value)
   if value == 0 then return end
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PART_SEL)
-  if part == 1 then -- upper patch
+  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
+  if part == 0 then -- upper patch
     local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
     0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x55, 0x70, 0x70, 0x65, 0x72, 
     0x20, 0x50, 0x61, 0x74, 0x63, 0x68, 0x20, 0x20, 0x20, 0x20, 0x20}
     midi.sendSysex (currentPort, message)
-  elseif part == 2 then -- lower patch
+  elseif part == 1 then -- lower patch
     local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
     0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x4C, 0x6F, 0x77, 0x65, 0x72, 
     0x20, 0x50, 0x61, 0x74, 0x63, 0x68, 0x20, 0x20, 0x20, 0x20, 0x20}
@@ -1174,7 +1075,7 @@ function getPatch(valueObject, value)
   end
 end
 
--- Globals data
+-- sysEx request for globals midi data
 function getGlobals(valueObject, value)
   if value == 0 then return end
   local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
@@ -1196,7 +1097,7 @@ end
 -- Stored atrophy profile data or the current patch's atrophy profile data 
 function getAtrophy(valueObject, value)
   if value == 0 then return end
-  local aNum = 49+(math.floor(parameterMap.get(deviceId, PT_VIRTUAL, VP.ATROPHY_PROF))) -- atrophy profile ascii # (-> decimal)
+  local aNum = 49+(math.floor(parameterMap.get(deviceId, PT_VIRTUAL, ATROPHY_NUMBER))) -- atrophy profile ascii # (-> decimal)
   if aNum < 57 then -- use one of the 8 stored atrophy profiles
     local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
       0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x41, 0x74, 0x72, 0x6F, 0x70, 
@@ -1213,8 +1114,8 @@ end
 -- specific patchX %c%03d data
 function getPatchX(valueObject, value)
   if value == 0 then return end
-  local bank = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.CURRENT_BANK) + 65
-  local number  = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PATCH_X_NUMBER)
+  local bank = parameterMap.get(deviceId, PT_VIRTUAL, 6032) + 65
+  local number  = parameterMap.get(deviceId, PT_VIRTUAL, 6033)
   local digits = asciiBytesFromNumber(number, 3)
   local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07,
     0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x50, 0x61, 0x74, 0x63, 0x68,
@@ -1232,10 +1133,6 @@ function getPatchNames(valueObject, value)
 --    sendTableWithDelay(currentPort, message, 1000)
   midi.sendSysex (currentPort, message)
 end
-
--- ============================================================
--- SYSEX PARSING
--- ============================================================
 
 -------------------------------------------------------------------------
 -- parses the parameters of UB-Xa sysEx dump
@@ -1397,7 +1294,7 @@ local EOF_SYSEX_FOURTH_BYTE = 0x7B -- ACK byte of EOF message
 local DUMP_TYPES = {
   UPPER_PATCH = "upperPatch",
   LOWER_PATCH = "lowerPatch",
-  PATCHX = "patchX",
+  PATCH_X = "patchX",
   PATCH_NAMES = "patchNames",
   GLOBAL = "global",
   ATROPHY = "atrophy",
@@ -1507,10 +1404,6 @@ local function collect_dump(sysexBlock, length)
   return temp
 end
 
--- ============================================================
--- SYSEX HANDLER
--- ============================================================
-
 function midi.onSysex(midiInput, sysexBlock)
   local ok, err = pcall(function()
     local length = sysexBlock:getLength()
@@ -1588,10 +1481,6 @@ function midi.onSysex(midiInput, sysexBlock)
   end
 end
 
--- ============================================================
--- DUMP PROCESSORS
--- ============================================================
-
 -- process an upper patch dump
 -- need to finish performance/panel settings parameters
 function patch(dump)
@@ -1623,13 +1512,13 @@ function patch(dump)
     {4, 95},      -- unison mode toggle 
     {5, 96},      -- poly voice #
     {6, 97},      -- unison voice #
-    -- { , 98},   -- 4 ?? (skipped)
+    -- { , 98},   -- ?? (skipped)
     {11, 99},     -- portamento spread
     {12, 100},     -- portamento range
     {262, 102},    -- LFO shape
     {533, 110},   -- Osc FEnv range
     {518, 112},   -- Osc1 shape
-    -- { , 113}, -- 19 ?? (skipped)
+    {535, 113},   -- (Osc1 quantize) ??
     {519, 114},   -- Osc2 level
     {520, 115},   -- Osc2 shape
     {536, 116},   -- Osc2 quantize
@@ -1696,6 +1585,22 @@ function patch(dump)
     {2054, 715},  -- VCA attack linearity
     {2055, 716},  -- VCA decay linearity
     {2053, 717},  -- VCA env chaos
+    {2176, 718},  -- per voice pan settings - 01
+    {2177, 719},  -- per voice pan settings - 02
+    {2178, 720},  -- per voice pan settings - 03
+    {2179, 721},  -- per voice pan settings - 04
+    {2180, 722},  -- per voice pan settings - 05
+    {2181, 723},  -- per voice pan settings - 06
+    {2182, 724},  -- per voice pan settings - 07
+    {2183, 725},  -- per voice pan settings - 08
+    {2184, 726},  -- per voice pan settings - 09
+    {2185, 727},  -- per voice pan settings - 10
+    {2186, 728},  -- per voice pan settings - 11
+    {2187, 729},  -- per voice pan settings - 12
+    {2188, 730},  -- per voice pan settings - 13
+    {2189, 731},  -- per voice pan settings - 14
+    {2190, 732},  -- per voice pan settings - 15
+    {2191, 733},  -- per voice pan settings - 16
     {2304, 734},  -- Atrophy profile name character 1
     {2305, 735},  -- Atrophy profile name character 2
     {2306, 736},  -- Atrophy profile name character 3
@@ -1703,7 +1608,6 @@ function patch(dump)
     {2308, 738},  -- Atrophy profile name character 5
     {2309, 739},  -- Atrophy profile name character 6
   }
-  appendSequentialMappings(mappings, VOICE_PAN_PARAMS, 718)
   -- Batch assign parameters
   for _, m in ipairs(mappings) do
     parameterMap.updateValue (deviceId, PT_NRPN, m[1], data[m[2]])
@@ -1746,18 +1650,18 @@ function patch(dump)
   if SD_FLAG == 0 then
     -- 2 byte performance parameters
     local mappings = {
-      {PARAMETER_IDS.NRPN.PERFORMANCE_PITCH_BEND_RANGE, 677},
-      {PARAMETER_IDS.NRPN.PERFORMANCE_OCTAVE_TRANSPOSE, 679},
-      {PARAMETER_IDS.NRPN.PERFORMANCE_LFO_RATE, 681},
-      {PARAMETER_IDS.NRPN.PERFORMANCE_LFO_DEPTH, 680},
+      {130, 677},  -- Performance pitch bend range (/64)
+      {131, 679},  -- Performance octave pitch transpose (/64)
+      {132, 681},  -- Performance LFO rate (/64)
+      {134, 680},  -- Performance LFO depth (/64) ??
     }
     for _, m in ipairs(mappings) do
       parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]]*64)
     end
     -- 1 byte performance parameters
     local mappings = {
-      {PARAMETER_IDS.NRPN.KEYBOARD_SPLIT_POINT, 673},
-      {PARAMETER_IDS.NRPN.PERFORMANCE_LFO_SHAPE, 682},
+      {1280, 673},  -- Performance keyboard split point
+      {133, 682},  -- Performance LFO shape
     }
     for _, m in ipairs(mappings) do
       parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]])
@@ -1773,7 +1677,7 @@ function patch(dump)
   end
 
   patchName = get_patch_name(data,79) -- update patchName (starts at byte 79 of data)
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PART_SEL)
+  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
   if part == 0 then
     patchName = "U "..patchName
   elseif part == 1 then 
@@ -1782,7 +1686,7 @@ function patch(dump)
   info.setText(patchName)
   print("Patch name: ".. patchName)
   local atrophyName = get_atrophy_name(data,734) -- name of the patch atrophy profile (starts at byte 734 of data)
-  controls.get(CONTROL_IDS.ATROPHY_NAME):setName(atrophyName)  -- display current atrophy profile name
+  controls.get (426):setName(atrophyName)  -- display current atrophy profile name
   print("Patch Atrophy name: ".. atrophyName)
   print("Patch settings parsed. Number of bytes: ".. #data.. " on MIDI channel: "..currentChannel)
 end
@@ -1833,6 +1737,22 @@ function atrophy(dump)
     {2054, 30},  -- VCA attack linearity
     {2055, 31},  -- VCA decay linearity
     {2053, 32},  -- VCA env chaos
+    {2176, 33},  -- per voice pan settings - 01
+    {2177, 34},  -- per voice pan settings - 02
+    {2178, 35},  -- per voice pan settings - 03
+    {2179, 36},  -- per voice pan settings - 04
+    {2180, 37},  -- per voice pan settings - 05
+    {2181, 38},  -- per voice pan settings - 06
+    {2182, 39},  -- per voice pan settings - 07
+    {2183, 40},  -- per voice pan settings - 08
+    {2184, 41},  -- per voice pan settings - 09
+    {2185, 42},  -- per voice pan settings - 10
+    {2186, 43},  -- per voice pan settings - 11
+    {2187, 44},  -- per voice pan settings - 12
+    {2188, 45},  -- per voice pan settings - 13
+    {2189, 46},  -- per voice pan settings - 14
+    {2190, 47},  -- per voice pan settings - 15
+    {2191, 48},  -- per voice pan settings - 16
     {2304, 49},  -- Atrophy profile name character 1
     {2305, 50},  -- Atrophy profile name character 2
     {2306, 51},  -- Atrophy profile name character 3
@@ -1840,16 +1760,14 @@ function atrophy(dump)
     {2308, 53},  -- Atrophy profile name character 5
     {2309, 54},  -- Atrophy profile name character 6
   }
-  appendSequentialMappings(mappings, VOICE_PAN_PARAMS, 33)
   -- Batch assign parameters
   for _, p in ipairs(mappings) do
---    parameterMap.set(deviceId, PT_NRPN, p[1], data[p[2]])
-    parameterMap.updateValue (deviceId, PT_NRPN, p[1], data[p[2]])
+    parameterMap.set (deviceId, PT_NRPN, p[1], data[p[2]]) -- has to .set instead of .updateValue so we can see the new values without having to change screen
   end
   print("atrophy settings parsed. Number of bytes: ".. #data)
   local atrophyName = get_atrophy_name(data,49) -- name of selected atrophy profile
   print("Atrophy profile name: ".. atrophyName)
-  controls.get(CONTROL_IDS.ATROPHY_NAME):setName(atrophyName)  -- display current atrophy profile name
+  controls.get (426):setName(atrophyName)  -- display current atrophy profile name
   return (data)
 end
 
@@ -2032,10 +1950,6 @@ function currentProgram(dump)
   print("current program settings parsed. Number of bytes: ".. #data)
 end
 
--- ============================================================
--- NRPN / CC PROCESSING
--- ============================================================
-
 -- Construct a midi.onNrpn(callback) by listening to midi.onControlChange
 -- callback(channel, nrpnParam, value, info)
 -- nrpnParam = 0..16383 (msb*128 + lsb)
@@ -2186,18 +2100,26 @@ end
  end)
 
 
--- ============================================================
--- PARAMETER CHANGE HANDLER
--- ============================================================
-
 function parameterMap.onChange(valueObjects, origin, midiValue)
   if origin ~= INTERNAL then return end
   local msg = valueObjects[1]:getMessage()
   local parameterNumber = msg:getParameterNumber()
   -- patch data when a patch selection has been made and after a program change executed
-  if parameterNumber == VP.PATCH_TRIG_B or parameterNumber == VP.PATCH_TRIG_A or parameterNumber == VP.PATCH_TRIG_C then
+  if parameterNumber == SELECT_MINUS or parameterNumber == SELECT_IT or parameterNumber == SELECT_PLUS then
     if midiValue > 0 then
-      local part = parameterMap.get(deviceId, PT_VIRTUAL, PARAMETER_IDS.VIRTUAL.PART_SEL)
+      local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
+      if part == 0 then
+        getUpperPatch()
+        print("upper patch requested")
+      elseif part == 1 then
+        getLowerPatch()
+        print("lower patch requested")
+      end
+    end
+  end
+  if parameterNumber == SELECT_SD then
+    if midiValue > 0 then
+      local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
       if part == 0 then
         getUpperPatch()
         print("upper patch requested")
@@ -2208,7 +2130,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     end
   end
   -- atrophy data when a profile number has been selected
-  if parameterNumber == VP.ATROPHY_PROF then
+  if parameterNumber == ATROPHY_NUMBER then
     if midiValue == 8 then -- profile saved in patch
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
                        0x03,0x00,0x42,0x49,0x4E,0x20,0x41,0x74,0x72,0x6F,0x70,
@@ -2223,7 +2145,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     end
   end
   -- Split Double mode toggle / request stored split-double data
-  if parameterNumber == PARAMETER_IDS.VIRTUAL.MODE then
+  if parameterNumber == PATCH_MODE then
     if midiValue == 1 then  -- multi 
       SD_FLAG = 1  -- set split/double flag on and request stored split/double data
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
@@ -2233,3 +2155,4 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     end
   end
 end
+
