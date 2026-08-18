@@ -550,13 +550,6 @@ function events.onPotTouchChange(potId, controlId, touched)
   if help then showHelp(help) end
 end
 
-local function resetVirtualAndControl(paramId, ctrlId)
-  parameterMap.set(deviceId, PT_VIRTUAL, paramId, 0)
-  local c = safeGet(ctrlId)
-  if c and type(c.setValue) == "function" then
-    pcall(function() c:setValue(0) end)
-  end
-end
 
 -- callback function for showing master midi tempo control 
 function showMidiTempo(valueObject,value)
@@ -567,29 +560,52 @@ function showMidiTempo(valueObject,value)
   end
 end
 
+-- show unison voice or poly voice depending on value of unison toggle
+function swapVoiceType(valueObject, value)
+  if value == 0 then
+    controls.get(CTRL_POLY_VOICES):setSlot(TARGET_VOICE_SLOT, TARGET_VOICE_PAGE) -- move control 48 into page 4, slot 11
+  else
+    controls.get(CTRL_UNISON_VOICES):setSlot(TARGET_VOICE_SLOT, TARGET_VOICE_PAGE) -- move control 53 into same page and slot
+  end
+end
+
+-- helper function to map an x bit bitmasked byte to a virtual parameter with values 0..2^x-1
+local function pset(params, value)
+  local x = #params
+  local v = math.floor(tonumber(value) or 0) & (2^x - 1)
+  for i, p in ipairs(params) do
+    if p ~= nil then
+      local bit = (v >> (i - 1)) & 1
+      parameterMap.set(deviceId, PT_VIRTUAL, p, bit) -- sets 1 or 0
+    end
+  end
+end
+
+-- helper for resetting double/split controls
+local function resetVirtualAndControl(paramId, ctrlId)
+  parameterMap.set(deviceId, PT_VIRTUAL, paramId, 0)
+  local c = safeGet(ctrlId)
+  if c and type(c.setValue) == "function" then
+    pcall(function() c:setValue(0) end)
+  end
+end
+
 -- callback function for patch mode parameter
 function patchMode(valueObject, value)
-  -- track previous mode and reset sticky params on transition
-  local prevMode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
-  -- write the new mode first so downstream reads see current state
-  parameterMap.set(deviceId, PT_VIRTUAL, PATCH_MODE, value)
-  -- clear sticky params on BOTH directions
-  if prevMode ~= nil and prevMode ~= value then
     -- transitions between 0 and 1 => reset DOUBLE_NUMBER + its control
-    if (prevMode == 0 and value == 1) or (prevMode == 1 and value == 0) then
+    if value == 1 then 
       resetVirtualAndControl(DOUBLE_NUMBER, CTRL_UPPER_DOUBLE)
       resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_DOUBLE)
     end
-    -- transitions between 1 and 2 => reset SPLIT_NUMBER + its control
-    if (prevMode == 1 and value == 2) or (prevMode == 2 and value == 1) then
+    -- transitions from 1 to 2 => reset SPLIT_NUMBER + its control
+    if value == 2 then
       resetVirtualAndControl(SPLIT_NUMBER, CTRL_UPPER_SPLIT)
       resetVirtualAndControl(DUMMY_NUMBER, CTRL_LOWER_SPLIT)
     end
-  end
   local visibilityMap = {
-    [0] = { show = {}, hide = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE,CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT,321,58,231,329} },
-    [1] = { show = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE,321,231,329}, hide = {58,CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT} },
-    [2] = { show = {CTRL_UPPER_SPLIT,CTRL_LOWER_SPLIT,58,321,231,329}, hide = {CTRL_UPPER_DOUBLE,CTRL_LOWER_DOUBLE} },
+    [0] = { show = {}, hide = {216,226,166,174,321,58,231,329} },
+    [1] = { show = {216,226,321,231,329}, hide = {58,166,174} },
+    [2] = { show = {166,174,58,321,231,329}, hide = {216,226} },
   }
   if visibilityMap[value] then
     if value == 0 then -- single mode
@@ -616,33 +632,19 @@ function patchMode(valueObject, value)
   displaySD(nil, 36)
 end
 
--- show unison voice or poly voice depending on value of unison toggle
-function swapVoiceType(valueObject, value)
-  if value == 0 then
-    controls.get(CTRL_POLY_VOICES):setSlot(TARGET_VOICE_SLOT, TARGET_VOICE_PAGE) -- move control 48 into page 4, slot 11
-  else
-    controls.get(CTRL_UNISON_VOICES):setSlot(TARGET_VOICE_SLOT, TARGET_VOICE_PAGE) -- move control 53 into same page and slot
-  end
-end
-
 -- callback function for double/split bank/patch number parameters
 function displaySD(valueObject, value)
   local BANK_NAMES = {"A","B","C","D"}
   local mode = parameterMap.get(deviceId, PT_VIRTUAL, PATCH_MODE)
   -- reset sticky params on specific mode transitions (both directions)
-  if lastDisplaySDMode ~= nil and mode ~= nil and lastDisplaySDMode ~= mode then
-    -- between 0 and 1: always clear DOUBLE_NUMBER/DUMMY_NUMBER
-    if (lastDisplaySDMode == 0 and mode == 1) or (lastDisplaySDMode == 1 and mode == 0) then
-      parameterMap.set(deviceId, PT_VIRTUAL, DOUBLE_NUMBER, 0)
-      parameterMap.set(deviceId, PT_VIRTUAL, DUMMY_NUMBER, 0)
-    end
-    -- between 1 and 2: always clear SPLIT_NUMBER/DUMMY_NUMBER
-    if (lastDisplaySDMode == 1 and mode == 2) or (lastDisplaySDMode == 2 and mode == 1) then
+    -- 0 -> 1, 1 <- 0, and 2 -> 1: always clear SPLIT_NUMBER
+    if (mode == 1) then
       parameterMap.set(deviceId, PT_VIRTUAL, SPLIT_NUMBER, 0)
-      parameterMap.set(deviceId, PT_VIRTUAL, DUMMY_NUMBER, 0)
     end
-  end
-  lastDisplaySDMode = mode
+    -- 1 -> 2: always clear DOUBLE_NUMBER
+    if mode == 2 then
+      parameterMap.set(deviceId, PT_VIRTUAL, DOUBLE_NUMBER, 36)
+    end
   if not mode or mode == 0 then return end   -- nothing to show in single mode
   local baseIndex
   if mode == 2 then
@@ -730,11 +732,6 @@ function setPanWidth(valueObject, value)
   end
 end
 
---function setPanDefault(valueObject, value)
---  local parameterNumber = valueObject:getMessage ():getParameterNumber ()
---  panDefValue[parameterNumber+1-2176] = value+128
---end
-
 -- callback function for patch number parameter
 function displayPatch (valueObject, value)
   local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
@@ -743,9 +740,9 @@ function displayPatch (valueObject, value)
   return (string.format(bankTxt[bankNum]).." "..string.format("%03d",value))
 end
 
-------------- sending bitmasked parameters 
+------------- sending bitmasked parameters --------------------------
 -- bitmask helper function ---
-function sendBitmask(paramNumber, deviceId, paramList)
+local function sendBitmask(paramNumber, deviceId, paramList)
   local value = 0
   for i,p in ipairs(paramList) do
     if p and parameterMap.get(deviceId, PT_VIRTUAL, p) ~= 0 then
@@ -835,7 +832,7 @@ function bitMask504(valueObject,value) -- NRPN 5/4 = 644 FilterModes
   sendBitmask(644, deviceId, {76,89}) 
 end
 
--- patch select program change functions -----------------------------------------------------------------------------------------------------------
+---------------- patch select program change functions -----------------------------------------------------------------------------
 function selectIt(valueObject, value)
   if value==0 then return end
   local message = valueObject:getMessage ()
@@ -1329,18 +1326,6 @@ function midi.onSysex(midiInput, sysexBlock)
   end)
   if not ok then
     print("onSysex: pcall failed: " .. tostring(err))
-  end
-end
-
--- helper function to map an x bit bitmasked byte to a virtual parameter with values 0..2^x-1
-function pset(params, value)
-  local x = #params
-  local v = math.floor(tonumber(value) or 0) & (2^x - 1)
-  for i, p in ipairs(params) do
-    if p ~= nil then
-      local bit = (v >> (i - 1)) & 1
-      parameterMap.set(deviceId, PT_VIRTUAL, p, bit) -- sets 1 or 0
-    end
   end
 end
 
