@@ -884,6 +884,14 @@ function setPanDefault(valueObject, value)
   panDefValue[parameterNumber+1-2176] = value+128
 end
 
+function displayPatch (valueObject, value)
+  local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
+  controls.get (209):setName(nameBank[bankNum][value])  -- display loaded patch names stored in nameBank
+  return (string.format(bankTxt[bankNum]).." "..string.format("%03d",value))
+end
+
+------------- sending bitmasked parameters 
 -- bitmask helper function ---
 function sendBitmask(paramNumber, deviceId, paramList)
   local value = 0
@@ -1025,14 +1033,7 @@ function selectSD(valueObject, value)
   midi.sendProgramChange(currentPort , ubxaLowerCh , progNum[2])
 end
 
-function displayPatch (valueObject, value)
-  local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
-  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, 6032)+1
-  controls.get (209):setName(nameBank[bankNum][value])  -- display loaded patch names stored in nameBank
-  return (string.format(bankTxt[bankNum]).." "..string.format("%03d",value))
-end
-
---- requests to UB-Xa for data dumps ---
+--- sysEx requests to UB-Xa for data dumps ---
 -- Current program data
 function getCurrentProgram(valueObject, value)
   if value == 0 then return end
@@ -1273,18 +1274,7 @@ function get_atrophy_name(data,startIdx)
   return trim(table.concat(nameChars))
 end
 
--- helper function to parse an x bit bitmask to a virtual parameter with values 0..2^x-1
-function pset(params, value)
-  local x = #params
-  local v = math.floor(tonumber(value) or 0) & (2^x - 1)
-  for i, p in ipairs(params) do
-    if p ~= nil then
-      local bit = (v >> (i - 1)) & 1
-      parameterMap.set(deviceId, PT_VIRTUAL, p, bit) -- sets 1 or 0
-    end
-  end
-end
-
+-- process incoming sysEx messages -------------------------------
 -- helper functions and globals for midi.onSysex 
 local sysex_states = {}
 local VENDOR_ID = {0x00, 0x20, 0x32} -- Behringer
@@ -1483,8 +1473,19 @@ function midi.onSysex(midiInput, sysexBlock)
   end
 end
 
--- process an upper patch dump
--- need to finish performance/panel settings parameters
+-- helper function to map an x bit bitmasked byte to a virtual parameter with values 0..2^x-1
+function pset(params, value)
+  local x = #params
+  local v = math.floor(tonumber(value) or 0) & (2^x - 1)
+  for i, p in ipairs(params) do
+    if p ~= nil then
+      local bit = (v >> (i - 1)) & 1
+      parameterMap.set(deviceId, PT_VIRTUAL, p, bit) -- sets 1 or 0
+    end
+  end
+end
+
+-- parse a patch dump 
 function patch(dump)
   -- parse of the incoming dump
   local result = parse_sysex(dump)
@@ -1501,7 +1502,6 @@ function patch(dump)
 --    print("patch: 2nd 2-byte parameter " .. idx .. ": " .. data[i+1])
     idx = idx+1
   end
-
   -- Assign the 39 2-byte parameters. Multiple 0-255 range parameters by 64 to scale to the 0-16383 (14-bit) range of nrpn
   -- The result doesn't always exactly match the UB-Xa because the range of a 2-byte parameter is actually 0-65535 (16-bit)
   local paramList = {0,1,2,3,128,256,257,258,259,260,384,385,386,387,388,389,390,391,392,393,394,395,396,
@@ -1677,7 +1677,6 @@ function patch(dump)
       pset(m[1],data[m[2]])
     end
   end
-
   patchName = get_patch_name(data,79) -- update patchName (starts at byte 79 of data)
   local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
   if part == 0 then
@@ -1693,9 +1692,8 @@ function patch(dump)
   print("Patch settings parsed. Number of bytes: ".. #data.. " on MIDI channel: "..currentChannel)
 end
 
--- for a global atrophy profile dump
+-- parse a global atrophy profile dump
 function atrophy(dump)
-  -- parse of the incoming dump
   local result = parse_sysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
@@ -1773,15 +1771,13 @@ function atrophy(dump)
   return (data)
 end
 
--- for a global settings dump
+-- parse a global settings dump
 function global(dump)
-  -- parse of the incoming dump
   local result = parse_sysex(dump)
   if not result or type(result.data) ~= "table" then
     print("Could not read data")
     return
   end
-  -- cache globals/functions for speed
   local data = result.data
   for i = 1, #data do
 --    print(string.format("global byte #: %d value: %s", i, tostring(data[i])))
@@ -1868,7 +1864,7 @@ function global(dump)
   print("global settings parsed. Number of bytes: ".. #data)
 end
 
--- process a split double dump
+-- parse a split/double dump
 function splitDouble(dump)
   -- parse of the incoming dump
   local result = parse_sysex(dump)
@@ -1911,7 +1907,7 @@ function splitDouble(dump)
   print("split double settings parsed. Number of bytes: ".. #data)
 end
 
--- for patch name dump
+-- parse a patch name dump
 function patchNames(dump)
 -- parse of the incoming dump. This takes a few seconds becaus ethere are 8192 bytes
   local result = parse_sysex(dump)
@@ -1936,8 +1932,8 @@ function patchNames(dump)
   print("patch names parsed. Number of bytes: ".. #data)
 end
 
--- process a current program dump
--- not used
+-- parse a current program dump
+-- not currently used
 function currentProgram(dump)
   -- parse of the incoming dump
   local result = parse_sysex(dump)
@@ -1952,7 +1948,8 @@ function currentProgram(dump)
   print("current program settings parsed. Number of bytes: ".. #data)
 end
 
--- Construct a midi.onNrpn(callback) by listening to midi.onControlChange
+-- parameter on change callback section ------------------------- 
+-- Lua API does not have a native midi.onNrpn(callback). Construct one by listening to midi.onControlChange
 -- callback(channel, nrpnParam, value, info)
 -- nrpnParam = 0..16383 (msb*128 + lsb)
 -- value = combined 14-bit value if LSB available, otherwise 7-bit MSB value (or amount for inc/dec)
@@ -2101,7 +2098,7 @@ end
   end
  end)
 
-
+-- parameterMap.onChange() seems to be delayed slightly relative to a UI parameter callback function, making successful parsing of sysEx dumps more likely 
 function parameterMap.onChange(valueObjects, origin, midiValue)
   if origin ~= INTERNAL then return end
   local msg = valueObjects[1]:getMessage()
