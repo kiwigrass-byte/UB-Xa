@@ -25,6 +25,17 @@ timer.setPeriod(500) -- Set timer tick rate (e.g., every 500 milliseconds)
 
 events.subscribe(POTS) -- for pot touch help
 
+-- load the UB-Xa global settings
+function preset.onLoad()
+  getGlobals(nil,1)
+end
+
+-- switch to page 1 and load the UB-Xa patch names from all 4 banks
+function preset.onReady()
+  pages.display(1)
+  getPatchNames(nil,1)
+end
+
 -- initialize data for the nrpn callback function
 local nrpn_state = {}
 local nrpn_callback = nil
@@ -74,17 +85,6 @@ local TARGET_SD_SLOT2 = 26
 local TARGET_SD_PAGE = 1
 local TARGET_VOICE_SLOT = 20
 local TARGET_VOICE_PAGE = 4
-
--- load the UB-Xa global settings when the preset is first loaded
-function preset.onLoad()
-  getGlobals(nil,1)
-end
-
--- switch to page 1 and load the UB-Xa patch names from all 4 banks when the preset is first loaded AND read to give more time for dump
-function preset.onReady()
-  pages.display(1)
-  getPatchNames(nil,1)
-end
 
 -- helper to make sure bad control id numbers are not called
 local function safeGet(id)
@@ -615,24 +615,15 @@ function patchMode(valueObject, value)
   end
   -- reset performance settings if in single mode
   if value == 0 then
-    row = {0, 60, 0, 24, 128, 117, 5, 0}
-    local param_map = {
-      {1280, 2, 1},   -- Performance keyboard split point
-      {130, 4, 64},   -- Performance pitch bend range (/64)
-      {131, 5, 64},   -- Performance octave pitch transpose (/64)
-      {132, 6, 64},  -- Performance LFO rate (/64)
-      {133, 7, 1},   -- Performance LFO shape
-      {134, 8, 64},  -- Performance LFO depth (/64)
-    }
+    row = { 0, 60, 0, 24, 128, 117, 5, 0 }
+    local param_map = { {1280, 2, 1}, {130, 4, 64}, {131, 5, 64}, {132, 6, 64}, {133, 7, 1}, {134, 8, 64}, }
     for _, m in ipairs(param_map) do
       local srcVal = row[m[2]] or 0
       parameterMap.set(deviceId, PT_NRPN, m[1], srcVal * m[3])
     end
     -- pset mappings (keeps original grouping)
     local pset_mappings = {
-      {{115,117,118,119}, row[1]},           -- Performance LFO mods
-      {{8,10,19,97,103,109}, row[3]},        -- Performance panel settings
-    }
+      { {115,117,118,119}, row[1]}, {{8,10,19,97,103,109}, row[3]}, }
     for _, m in ipairs(pset_mappings) do
       pset(m[1], m[2])
     end
@@ -680,14 +671,12 @@ function displaySD(valueObject, value)
     controls.get(ctrlLower):setName(BANK_NAMES[lb]..lp.." "..nameBank[lb][lp])
   end
   -- set performance parameters based on split/double patch data in sdMatrix
-  local mappings = {  {1280, 6, 1}, {130, 10, 64}, {131, 12, 64}, {132, 14, 64}, {133, 15, 1}, {134, 18, 64}, 
-    }
+  local mappings = {  {1280, 6, 1}, {130, 10, 64}, {131, 12, 64}, {132, 14, 64}, {133, 15, 1}, {134, 18, 64}, }
   for _, m in ipairs(mappings) do
     local srcVal = row[m[2]] or 0
     parameterMap.set(deviceId, PT_NRPN, m[1], srcVal * m[3])
   end
-  local mappings = { {{115,117,118,119}, row[5]}, {{8,10,19,97,103,109}, row[7]},
-  }
+  local mappings = { {{115,117,118,119}, row[5]}, {{8,10,19,97,103,109}, row[7]}, }
   for _, m in ipairs(mappings) do
     pset(m[1], m[2])
   end
@@ -697,8 +686,7 @@ end
 function setPanType(valueObject, type)
   if type == nil then return end
   local widthControl = math.min(parameterMap.get(deviceId, PT_VIRTUAL,201),100)
-  local paramList = { 2176,2177,2178,2179,2180,2181,2182,2183, 2184,2185,2186,2187,2188,2189,2190,2191
-  }
+  local paramList = { 2176,2177,2178,2179,2180,2181,2182,2183, 2184,2185,2186,2187,2188,2189,2190,2191, }
   local value = 0
   local steps = {0, 85, 170, 255}
   for i, param in ipairs(paramList) do  
@@ -716,8 +704,7 @@ end
 function setPanWidth(valueObject, value)
   local widthControl = parameterMap.get(deviceId, PT_VIRTUAL,201)
   local paramList = {
-    2176,2177,2178,2179,2180,2181,2182,2183, 2184,2185,2186,2187,2188,2189,2190,2191
-  }
+    2176,2177,2178,2179,2180,2181,2182,2183, 2184,2185,2186,2187,2188,2189,2190,2191, }
   for i, param in ipairs(paramList) do
     --print ("i : "..i..", param;"..param.." panDefValue[i]: "..panDefValue[i].." widthControl: "..widthControl)
     parameterMap.set(deviceId, PT_NRPN, param, math.max(math.min(math.floor(128+(panDefValue[i]-128)*widthControl/100),255),0))   
@@ -824,6 +811,11 @@ function bitMask504(valueObject,value) -- NRPN 5/4 = 644 FilterModes
   sendBitmask(644, deviceId, {76,89}) 
 end
 
+function bitMask2000(valueObject,value) -- NRPN 20/0 = 2560 side panel options (global)
+-- Bitmask: Save Patch (001), Load Transp (010), Transp MIDI (100)
+  sendBitmask(2560, deviceId, {300,301,302})
+end
+
 ---------------- patch select program change functions -----------------------------------------------------------------------------
 function selectIt(valueObject, value)
   if value==0 then return end
@@ -876,7 +868,7 @@ function selectSD(valueObject, value)
   midi.sendProgramChange(currentPort , ubxaLowerCh , progNum[2])
 end
 
--------------------------- sysEx requests to UB-Xa for data dumps ---------------------------
+-------------------------- sysEx requests to UB-Xa for midi data ---------------------------
 -- Upper patch data
 function getUpperPatch(valueObject, value)
   if value == 0 then return end
@@ -915,12 +907,12 @@ function getAtrophy(valueObject, value)
   if value == 0 then return end
   -- atrophy profile ascii # (-> decimal)
   local aNum = 49+(math.floor(parameterMap.get(deviceId, PT_VIRTUAL, ATROPHY_NUMBER))) 
-  if aNum < 57 then -- use one of the 8 stored atrophy profiles
+  if aNum < 57 then -- request one of the 8 stored atrophy profiles
     local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
       0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x41, 0x74, 0x72, 0x6F, 0x70, 
       0x68, 0x79, 0x58, 0x20, aNum, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
     midi.sendSysex (currentPort, message)
-  elseif aNum == 57 then -- use the current patch atrophy settings
+  elseif aNum == 57 then -- request the current patch atrophy settings
     local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
       0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x41, 0x74, 0x72, 0x6F, 0x70, 
       0x68, 0x79, 0x20, 0x53, 0x65, 0x74, 0x74, 0x69, 0x6E, 0x67, 0x73}
@@ -933,13 +925,11 @@ function getPatchNames(valueObject, value)
   local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07,
     0x03, 0x7F, 0x42, 0x49, 0x4E, 0x20, 0x50, 0x61, 0x74, 0x63, 0x68, 
     0x20, 0x4E, 0x61, 0x6D, 0x65, 0x73, 0x20, 0x20, 0x20, 0x20, 0x20}
-    --, 0x00, 0x03}
---    sendTableWithDelay(currentPort, message, 1000)
   midi.sendSysex (currentPort, message)
 end
 
 -------------------------------------------------------------------------
--- parses the parameters of UB-Xa sysEx dump
+-- parse the bytes of UB-Xa sysEx dump
 ------------------------------------------------------------------------
 -- This is lua equivalent of the php script by @Electrolove to extract the patch name from a UB-Xa patch sysEx dump
 -- Helper: safe getter that treats PHP-style 0-based indices: pass php_index (0-based)
@@ -947,11 +937,11 @@ local function get(msg, idx0)
   -- msg is a Lua array indexed from 1..n; PHP index k => Lua index (k+1)
   return msg[idx0 + 1]
 end
--- Unpack MIDI 7-bit-packed data.
+-- Helper function to unpack MIDI 7-bit-packed data.
 -- Input: array of bytes indexed 1..n (Lua-style). The PHP code processes groups of 8 bytes:
 --   msb byte followed by 7 bytes; bits in msb say whether to set top-bit (0x80) on corresponding byte.
 -- Output: array of full bytes (1..m).
-function unpack_midi(array)
+local function unpack_midi(array)
   local result = {}
   local i = 1
   while i <= #array do
@@ -1298,8 +1288,7 @@ function patch(dump)
   end
   -- Map the 39 2-byte value to nrpn parameters. 
   -- Multiple 0-255 range parameters by 64 to scale to the 0-16383 (14-bit) range of nrpn. he result doesn't always exactly match the UB-Xa because the range of a 2-byte parameter is actually 0-65535 (16-bit)
-  local paramList = { 0,1,2,3,128,256,257,258,259,260,384,385,386,387,388,389,390,391,392,393,394,395,396,512,513,514,515,640,641,642,643,768,770,772,774,769,771,773,775,
-  }
+  local paramList = { 0,1,2,3,128,256,257,258,259,260,384,385,386,387,388,389,390,391,392,393,394,395,396,512,513,514,515,640,641,642,643,768,770,772,774,769,771,773,775, }
   for i = 1,39 do
     parameterMap.updateValue (deviceId, PT_NRPN, paramList[i], param2[i]*64) 
   end
@@ -1313,35 +1302,30 @@ function patch(dump)
     {138, 686}, {267, 687}, {268, 688}, {521, 689}, {522, 690}, {523, 691}, {524, 692}, {527, 693}, {528, 694}, {529, 695}, {530, 696}, {531, 697}, {532, 698}, {645, 699}, {646, 700}, {648, 701}, {649, 702}, {665, 703},       
     --Atrophy
     {666, 704}, {652, 705}, {654, 706}, {655, 707}, {656, 708}, {658, 709}, {659, 710}, {660, 711}, {2049, 712}, {2050, 713}, {2051, 714}, {2054, 715}, {2055, 716}, {2053, 717}, {2176, 718}, {2177, 719}, {2178, 720}, 
-    {2179, 721}, {2180, 722}, {2181, 723}, {2182, 724}, {2183, 725}, {2184, 726}, {2185, 727}, {2186, 728}, {2187, 729}, {2188, 730}, {2189, 731}, {2190, 732}, {2191, 733}, {2304, 734}, {2305, 735}, {2306, 736}, {2307, 737}, {2308, 738}, {2309, 739},
-  }
+    {2179, 721}, {2180, 722}, {2181, 723}, {2182, 724}, {2183, 725}, {2184, 726}, {2185, 727}, {2186, 728}, {2187, 729}, {2188, 730}, {2189, 731}, {2190, 732}, {2191, 733}, {2304, 734}, {2305, 735}, {2306, 736}, {2307, 737}, 
+    {2308, 738}, {2309, 739}, }
   for _, m in ipairs(mappings) do
     parameterMap.updateValue (deviceId, PT_NRPN, m[1], data[m[2]])
   end
   -- Map bit masked bytes
-  local mappings = { {{37,38,39,40}, 101}, {{50,51,27}, 103}, {{30,31}, 104}, {{33,35,44}, 105}, {{49,46}, 106}, {{136,137,138,139,140}, 107}, {{141,142,143,144,145}, 108}, {{2,9}, 109}, {{3,154,155}, 111}, {{76,89}, 121}, 
-  }
+  local mappings = { {{37,38,39,40}, 101}, {{50,51,27}, 103}, {{30,31}, 104}, {{33,35,44}, 105}, {{49,46}, 106}, {{136,137,138,139,140}, 107}, {{141,142,143,144,145}, 108}, {{2,9}, 109}, {{3,154,155}, 111}, {{76,89}, 121}, }
   for _, m in ipairs(mappings) do
     pset(m[1],data[m[2]])
   end
   -- use patch performance byte values unless in split-double mode
-  print("Patch Mode = ".. mode)
   if mode == 0 then
     -- 2 byte performance values mapped to nrpn parameters
-    local mappings = { {130, 677}, {131, 679}, {132, 681}, {134, 685}, 
-    }
+    local mappings = { {130, 677}, {131, 679}, {132, 681}, {134, 685}, }
     for _, m in ipairs(mappings) do
       parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]]*64)
     end
     -- 1 byte performance byte values mapped to nrpn parameters
-    local mappings = { {1280, 673}, {133, 682},
-    }
+    local mappings = { {1280, 673}, {133, 682}, }
     for _, m in ipairs(mappings) do
       parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]])
     end
     -- Map bit masked bytes
-    local mappings = { {{115,117,118,119}, 672}, {{8,10,19,97,103,109}, 674},
-    }
+    local mappings = { {{115,117,118,119}, 672}, {{8,10,19,97,103,109}, 674}, }
     for _, m in ipairs(mappings) do
       pset(m[1],data[m[2]])
     end
@@ -1365,15 +1349,13 @@ end
 ------------------ parse a global atrophy profile dump ------------------------------
 function atrophy(dump)
   local data = parseDump(dump)
-  -- Map atrophy profile byte values to nrpn parameters values
-  local mappings = {
-    {138, 1}, {267, 2}, {268, 3}, {521, 4}, {522, 5}, {523, 6}, {524, 7}, {527, 8}, {528, 9}, {529, 10}, {530, 11}, {531, 12}, {532, 13}, {645, 14}, {646, 15}, {648, 16}, {649, 17}, {665, 18}, {666, 19}, {652, 20},
+  -- Map atrophy profile byte values to nrpn parameters
+  local mappings = { {138, 1}, {267, 2}, {268, 3}, {521, 4}, {522, 5}, {523, 6}, {524, 7}, {527, 8}, {528, 9}, {529, 10}, {530, 11}, {531, 12}, {532, 13}, {645, 14}, {646, 15}, {648, 16}, {649, 17}, {665, 18}, {666, 19}, {652, 20},
     {654, 21}, {655, 22}, {656, 23}, {658, 24}, {659, 25}, {660, 26}, {2049, 27}, {2050, 28}, {2051, 29}, {2054, 30}, {2055, 31}, {2053, 32}, {2176, 33}, {2177, 34}, {2178, 35}, {2179, 36}, {2180, 37}, {2181, 38}, {2182, 39},  
-    {2183, 40}, {2184, 41}, {2185, 42}, {2186, 43}, {2187, 44}, {2188, 45}, {2189, 46}, {2190, 47}, {2191, 48}, {2304, 49}, {2305, 50}, {2306, 51}, {2307, 52}, {2308, 53}, {2309, 54}, 
-  }
+    {2183, 40}, {2184, 41}, {2185, 42}, {2186, 43}, {2187, 44}, {2188, 45}, {2189, 46}, {2190, 47}, {2191, 48}, {2304, 49}, {2305, 50}, {2306, 51}, {2307, 52}, {2308, 53}, {2309, 54}, }
   -- Batch assign parameters
   for _, p in ipairs(mappings) do
-    parameterMap.set (deviceId, PT_NRPN, p[1], data[p[2]]) -- has to .set instead of .updateValue so we can see the new values without having to change page
+    parameterMap.set (deviceId, PT_NRPN, p[1], data[p[2]]) -- use .set instead of .updateValue so we can see the new values without having to change page
   end
   print("atrophy settings parsed. Number of bytes: ".. #data)
   local atrophyName = get_atrophy_name(data,49) 
@@ -1386,25 +1368,26 @@ end
 function global(dump)
   local data = parseDump(dump)
   -- Map global byte values to nrpn parameters
-  -- (1 is RFU), (8,9,10,11 are RFU), (13,14 are UI lastPatch and UIDisable settings - bitmasked), (19 is song position - bitmasked), (24-27 are other midi settings - bitmasked), (50 is performance panel options - bitmasked)
+  -- (1 is RFU), (8,9,10,11 are RFU), (13,14 are UI lastPatch and UIDisable settings - bitmasked), (19 is song position - bitmasked), (24-27 are other midi settings - bitmasked), 
   -- {,61} -- RFU (0-32), {1793, 62}, -- Display contrast, {1794, 63}, -- Lever settings, {1795, 64}, -- Fan, {1920, 65}, -- Background calibration settings
-  local mappings = {
-    {8, 2}, {9, 3}, {10, 4}, {136, 5}, {137, 6}, {904, 7}, {909,  12}, {912,  15}, {1166, 16}, {1154, 17}, {1155, 18}, {1165, 28}, {1281, 29}, {1282, 30}, {1283, 31}, {1284, 32}, {1408, 33}, {1409, 34}, {1410, 35}, 
+  local mappings = { {8, 2}, {9, 3}, {10, 4}, {136, 5}, {137, 6}, {904, 7}, {909,  12}, {912,  15}, {1166, 16}, {1154, 17}, {1155, 18}, {1165, 28}, {1281, 29}, {1282, 30}, {1283, 31}, {1284, 32}, {1408, 33}, {1409, 34}, {1410, 35}, 
     {1411, 36}, {1412, 37}, {1413, 38}, {1414, 39}, {1415, 40}, {1416, 41}, {1417, 42}, {1418, 43}, {1419, 44}, {1420, 45}, {1421, 46}, {1422, 47}, {1423, 48}, {1424, 49}, 
-    {1664, 53}, {1665, 54}, {1666, 55}, {1667, 56}, {1668, 57}, {1669, 58}, {1670, 59}, {1671, 60}, 
-  }
+    {1664, 53}, {1665, 54}, {1666, 55}, {1667, 56}, {1668, 57}, {1669, 58}, {1670, 59}, {1671, 60}, }
   -- Batch assign nrpn parameters
   for _, p in ipairs(mappings) do
 --    parameterMap.set(deviceId, PT_NRPN, p[1], data[p[2]])
     parameterMap.updateValue(deviceId, PT_NRPN, p[1], data[p[2]])
   end
   -- MIDI channel settings done separately and made read only (PT_VIRTUAL)
-  local mappings = {
-    {1157, 20}, {1158, 21}, {1159, 22}, {1160, 23},  
-  }
+  local mappings = { {1157, 20}, {1158, 21}, {1159, 22}, {1160, 23}, }
   -- Batch assign MIDI channel parameters (read only )
   for _, p in ipairs(mappings) do
     parameterMap.set(deviceId, PT_NONE, p[1], data[p[2]])
+  end
+  -- Map bit masked byte
+  local mappings = { {{300,301,302}, 50}, }
+  for _, m in ipairs(mappings) do
+    pset(m[1],data[m[2]])
   end
   -- Read raw channel values from UB-Xa params
   -- UB-Xa gives 0..15 so add 1
