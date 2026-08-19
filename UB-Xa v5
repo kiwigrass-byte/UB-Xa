@@ -1256,7 +1256,6 @@ function midi.onSysex(midiInput, sysexBlock)
         -- dumpType already set by first header, do not reset
       end
     end
-
     -- PACKET detection: simplified to single peek
     if length > 6 and safe_peek(sysexBlock, length, 11) == PACKET_MSG_TYPE then
       local packetNum = safe_peek(sysexBlock, length, 12)
@@ -1265,11 +1264,9 @@ function midi.onSysex(midiInput, sysexBlock)
       end
     end
     table.insert(state.dump, collect_dump(sysexBlock, length))
-
     -- Logging (optional)
 --    log_sysex(state.msgNumber, iface, length, sysexBlock)
     -- Collect message into dump
-
     -- Call handler on EOF if applicable
     if state.dumpType then
       local handlerInfo = HANDLERS[state.dumpType]
@@ -1466,14 +1463,12 @@ function splitDouble(dump)
     table.remove(data, i)  -- ignore the first 8 bytes that are TOF data.
   end
   local rows, cols = 72, 18
-  -- UP,UB,LP,LB,LFP modes,kybd split, panel settings, PB range, transpose, lfo rate, shape, depth 
-  local idx = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18} 
-  sdMatrix = {}
+  sdMatrix = initMatrix(rows, cols, 0)
   for r = 1, rows do
-    sdMatrix[r] = {}
     local base = (r - 1) * cols
-    for i = 1, #idx do
-      sdMatrix[r][i] = data[base + idx[i]]
+    local row = sdMatrix[r]
+    for c = 1, cols do
+      row[c] = data[base + c]
     end
   end
   print("split double settings parsed. Number of bytes: ".. #data)
