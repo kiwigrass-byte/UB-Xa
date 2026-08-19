@@ -1,0 +1,56 @@
+-- Map global byte values to nrpn parameters
+  local mappings = {
+    {8,   2}, -- Aftertouch level (1 is RFU)
+    {9,   3}, -- Unison note priority
+    {10,  4}, -- Chord note priority
+    {136, 5}, -- Lower pitch sensitivity
+    {137, 6}, -- Upper pitch sensitivity
+    {904, 7}, -- vintage knob (8,9,10,11 are RFU)
+    {909,  12}, -- Atrophy profile number 
+--    (13,14 are UI lastPatch and UIDisable settings - bitmasked)
+    {912,  15}, -- Atrophy mode
+    {1166, 16}, -- global midi transpose
+    {1154, 17}, -- global midi tempo
+    {1155, 18}, -- midi sync source 
+--    (19 is song position - bitmasked)
+--    (24-27 are other midi settings - bitmasked)
+    {1165, 28}, -- MPE profile
+    {1281, 29}, -- Velocity curve 
+    {1282, 30}, -- Velocity scale
+    {1283, 31}, -- Aftertouch pressure
+    {1284, 32}, -- Aftertouch curve
+    {1408, 33}, -- Sustain pedal assign
+    {1409, 34}, -- Sustain pedal action
+    {1410, 35}, -- Sustain pedal latch
+    {1411, 36}, -- Program pedal action
+    {1412, 37}, -- Program pedal action
+    {1413, 38}, -- Program pedal latch
+    {1414, 39}, -- Hold pedal assign
+    {1415, 40}, -- Hold pedal action
+    {1416, 41}, -- Hold pedal latch
+    {1417, 42}, -- Vib pedal assign
+    {1418, 43}, -- Vib pedal action
+    {1419, 44}, -- Vib pedal min
+    {1420, 45}, -- Vib pedal max
+    {1421, 46}, -- Filter pedal assign
+    {1422, 47}, -- Filter pedal action
+    {1423, 48}, -- Filter pedal min
+    {1424, 49}, -- Filter pedal max 
+--    (50 is performance panel options - bitmasked)
+    {1664, 53}, -- turn voices 1-8 on/off
+    {1665, 54}, -- turn voices 9-16 on/off
+    {1666, 55}, -- turn pwm calib 1-8 on/off
+    {1667, 56}, -- turn pwm calib 9-16 on/off
+    {1668, 57}, -- turn vco calib 1-8 on/off
+    {1669, 58}, -- turn vco calib 9-16 on/off
+    {1670, 59}, -- turn vcf calib 1-8 on/off
+    {1671, 60}, -- turn vcf calib 9-16 on/off
+--    {,61} -- RFU (0-32), {1793, 62}, -- Display contrast, {1794, 63}, -- Lever settings, {1795, 64}, -- Fan, {1920, 65}, -- Background calibration settings
+  }
+  -- MIDI channel settings done separately and made read only (PT_VIRTUAL)
+  local mappings = {
+    {1157, 20}, -- upper midi rx channel 
+    {1158, 21}, -- lower midi rx channel
+    {1159, 22}, -- upper midi tx channel
+    {1160, 23}, -- lower midi tx channel 
+  }
