@@ -11,7 +11,7 @@ UB-Xa v4.1 published 8/19/26
 
 <img width="1003" height="718" alt="image" src="https://github.com/user-attachments/assets/a248d916-3998-4e95-a48c-f366de079591" />
 
-# Behringer UB-Xa NewIgnis 10/2024
+## Behringer UB-Xa NewIgnis 10/2024
 
 Updated by kiwigrass August 2026
 
@@ -22,7 +22,7 @@ Version 4.1
 
 - *Make sure the UB-Xa is set to transmit and receive NRPNs.*
 ---
-# What's new
+## What's new
 - The preset should automatically detect the upper and lower part's midi transmit channels from the UB-Xa. 
 
 - Various global settings are parsed when the preset is first loaded. This can also be triggered by pressing the **GLOBALS** button. The 512 patch names are also parsed on load. The names are displayed when scrolling the **PATCH** number fader. Parsing all the patch names takes a few seconds to complete (it is 8192 bytes of data) so be patient. The patch names can also be retrieved by pressing the **PATCH NAMES** button.
@@ -35,7 +35,7 @@ Version 4.1
 
 - You can send a patch to an active Double (Split) profile using the **PATCH SELECT** controls. 
 
-# What's in the preset
+## What's in the preset
 - Controls **all** parameters of a patch. Also, responds to most parameter changes on the synth.
 
 - Controls ARP and SEQ parameters of both parts.  
@@ -52,7 +52,7 @@ Version 4.1
 
 - Unless it is very obvious, dark blue global controls and **grey** shift patch controls display a help text in the lower right corner upon touch, showing where to find them on the UB-Xa. Bright green atrophy controls display the atrophy parameter number when touched.
 
-# NOTES: 
+## Notes: 
 - The Double/Split mode and the Upper/Lower panel controls on the UB-Xa panel can not be controlled remotely. To use the Double (Split) features of the preset you need to enter the mode on the synth first. 
 
 - Currently, only one part's ARP and SEQ settings are parsed at a time. But both parts can be simultaneously controlled.
