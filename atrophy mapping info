@@ -1,0 +1,57 @@
+  -- map byte values to nrpn parameters
+  local mappings = {
+    {138, 1}, -- max speed of main mod LFO
+    {267, 2},  -- max speed of performance LFO
+    {268, 3},  -- OB8 Quirks (bitmasked)
+    {521, 4},  -- Osc1 PW left trim
+    {522, 5},  -- Osc1 PW right trim
+    {523, 6},  -- Osc2 PW left trim
+    {524, 7},  -- Osc2 PW right trim
+    {527, 8},  -- PWM offset
+    {528, 9},  -- osc drift
+    {529, 10},  -- osc vol/oct error 
+    {530, 11},  -- osc drift speed
+    {531, 12},  -- osc vol/oct chaos !!WRONG!!!
+    {532, 13},  -- osc initial freq
+    {645, 14},  -- 2-pole resonance trim
+    {646, 15},  -- 4-pole resonance trim
+    {648, 16},  -- 2-pole floor
+    {649, 17},  -- 4-pole floor
+    {665, 18},  -- filter env attack linearity      
+    {666, 19},  -- filter env decay linearity
+    {652, 20},  -- filter env chaos
+    {654, 21},  -- filter drift
+    {655, 22},  -- filter drift speed
+    {656, 23},  -- filter track offset
+    {658, 24},  -- filter v/oct error
+    {659, 25},  -- filter v/oct drift
+    {660, 26},  -- filter initial freq
+    {2049, 27},  -- VCA bias 2p filter
+    {2050, 28},  -- VCA bias unison bias
+    {2051, 29},  -- VCA bias master
+    {2054, 30},  -- VCA attack linearity
+    {2055, 31},  -- VCA decay linearity
+    {2053, 32},  -- VCA env chaos
+    {2176, 33},  -- per voice pan settings - 01
+    {2177, 34},  -- per voice pan settings - 02
+    {2178, 35},  -- per voice pan settings - 03
+    {2179, 36},  -- per voice pan settings - 04
+    {2180, 37},  -- per voice pan settings - 05
+    {2181, 38},  -- per voice pan settings - 06
+    {2182, 39},  -- per voice pan settings - 07
+    {2183, 40},  -- per voice pan settings - 08
+    {2184, 41},  -- per voice pan settings - 09
+    {2185, 42},  -- per voice pan settings - 10
+    {2186, 43},  -- per voice pan settings - 11
+    {2187, 44},  -- per voice pan settings - 12
+    {2188, 45},  -- per voice pan settings - 13
+    {2189, 46},  -- per voice pan settings - 14
+    {2190, 47},  -- per voice pan settings - 15
+    {2191, 48},  -- per voice pan settings - 16
+    {2304, 49},  -- Atrophy profile name character 1
+    {2305, 50},  -- Atrophy profile name character 2
+    {2306, 51},  -- Atrophy profile name character 3
+    {2307, 52},  -- Atrophy profile name character 4
+    {2308, 53},  -- Atrophy profile name character 5
+    {2309, 54},  -- Atrophy profile name character 6
+  }
