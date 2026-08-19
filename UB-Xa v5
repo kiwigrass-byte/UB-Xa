@@ -1616,7 +1616,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   if origin ~= INTERNAL then return end
   local msg = valueObjects[1]:getMessage()
   local parameterNumber = msg:getParameterNumber()
-  -- patch data when a patch selection has been made and after a program changes executed
+  -- request patch data when a patch selection has been made and after a program changes executed
   if parameterNumber == SELECT_MINUS or parameterNumber == SELECT_IT or parameterNumber == SELECT_PLUS or parameterNumber == SELECT_SD then
     if midiValue > 0 then
       local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
