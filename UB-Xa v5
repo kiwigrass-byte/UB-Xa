@@ -1,7 +1,8 @@
--- Behringer UB-Xa
+-- electra one mk2 preset for Behringer UB-Xa
+-- version 5
 ----------------------------  general global settings --------------------------------------- 
-local MODEL_BYTE = 0x3A  -- set Desktop Model
--- MODEL_BYTE = 0x21  -- Keyboard Model
+local MODEL_BYTE = 0x3A -- Desktop Model
+-- MODEL_BYTE = 0x21 -- Keyboard Model
 local currentDevice  = devices.get(1)
 local deviceId = currentDevice:getId()
 local currentChannel = currentDevice:getChannel ()
@@ -1301,186 +1302,65 @@ function patch(dump)
   local idx = 1
   for i = 1,77,2 do -- 2-byte parameters - parameter value is located in the 2nd byte of pair
     param2[idx] = data[i+1]
---    print("patch: 2nd 2-byte parameter " .. idx .. ": " .. data[i+1])
     idx = idx+1
   end
-  -- Map the 39 2-byte parameters. Multiple 0-255 range parameters by 64 to scale to the 0-16383 (14-bit) range of nrpn
-  -- The result doesn't always exactly match the UB-Xa because the range of a 2-byte parameter is actually 0-65535 (16-bit)
+  -- Map the 39 2-byte parameters. 
+  -- Multiple 0-255 range parameters by 64 to scale to the 0-16383 (14-bit) range of nrpn. he result doesn't always exactly match the UB-Xa because the range of a 2-byte parameter is actually 0-65535 (16-bit)
   local paramList = {0,1,2,3,128,256,257,258,259,260,384,385,386,387,388,389,390,391,392,393,394,395,396,
                   512,513,514,515,640,641,642,643,768,770,772,774,769,771,773,775}
   for i = 1,39 do
     parameterMap.updateValue (deviceId, PT_NRPN, paramList[i], param2[i]*64) 
   end
-  -- Assign remaining patch parameters. Some are bitmasked and treated separately. Some PLFO settings are 2-byte
+  -- Map patch bytes values to nrpn parameters and bitmasked virtual parameters. 
+  -- { , 98},   -- ?? (skipped)
+  -- (154 is RFU)
   local mappings = {
-    {4, 95},      -- unison mode toggle 
-    {5, 96},      -- poly voice #
-    {6, 97},      -- unison voice #
-    -- { , 98},   -- ?? (skipped)
-    {11, 99},     -- portamento spread
-    {12, 100},     -- portamento range
-    {262, 102},    -- LFO shape
-    {533, 110},   -- Osc FEnv range
-    {518, 112},   -- Osc1 shape
-    {535, 113},   -- (Osc1 quantize) ??
-    {519, 114},   -- Osc2 level
-    {520, 115},   -- Osc2 shape
-    {536, 116},   -- Osc2 quantize
-    {525, 117},   -- Osc1 lfo amount
-    {534, 118},   -- Osc2 lfo amount
-    {526, 119},   -- Osc1 pwm lfo amount
-    {537, 120},   -- Osc2 pwm lfo amount
-    {664, 122},   -- Range of filter tracking
-    {650, 123},   -- Range of filter envelope
-    {647, 124},   -- Range of filter frequency
-    {653, 125},   -- Range of filter LFO
-    {657, 126},   -- Range of filter pedal
-    {776, 127},   -- mod source 1
-    {777, 128},   -- mod dest 1
-    {780, 129},   -- mod source 2
-    {781, 130},   -- mod dest 2
-    {784, 131},   -- mod source 3
-    {785, 132},   -- mod dest 3
-    {788, 133},   -- mod source 4
-    {789, 134},   -- mod dest 4
-    {778, 135},   -- mod source 5
-    {779, 136},   -- mod dest 5
-    {782, 137},   -- mod source 6
-    {783, 138},   -- mod dest 6
-    {786, 139},   -- mod source 7
-    {787, 140},   -- mod dest 7
-    {790, 141},   -- mod source 8
-    {791, 142},   -- mod dest 8
-    {913, 152},   -- Atrophy preference
-    {1152, 153},  -- patch midi transpose
--- (154 is RFU)    
-    {2056, 155},  -- VCA LFO Amount
-
--- atrophy patch parameters
-    {138, 686},  -- max speed of main mod LFO
-    {267, 687},  -- max speed of performance LFO
-    {268, 688},  -- OB-8 quairks (bitmasked)
-    {521, 689},  -- Osc1 PW left trim
-    {522, 690},  -- Osc1 PW right trim
-    {523, 691},  -- Osc2 PW left trim
-    {524, 692},  -- Osc2 PW right trim
-    {527, 693},  -- PWM offset
-    {528, 694},  -- osc drift
-    {529, 695},  -- osc vol/oct error 
-    {530, 696},  -- osc drift speed
-    {531, 697},  -- osc vol/oct chaos !!WRONG!!!
-    {532, 698},  -- osc initial freq
-    {645, 699},  -- 2-pole resonance trim
-    {646, 700},  -- 4-pole resonance trim
-    {648, 701},  -- 2-pole floor
-    {649, 702},  -- 4-pole floor
-    {665, 703},  -- filter env attack linearity      
-    {666, 704},  -- filter env decay linearity
-    {652, 705},  -- filter env chaos
-    {654, 706},  -- filter drift
-    {655, 707},  -- filter drift speed
-    {656, 708},  -- filter track offset
-    {658, 709},  -- filter v/oct error
-    {659, 710},  -- filter v/oct drift
-    {660, 711},  -- filter initial freq
-    {2049, 712},  -- VCA bias 2p filter
-    {2050, 713},  -- VCA bias unison bias
-    {2051, 714},  -- VCA bias master
-    {2054, 715},  -- VCA attack linearity
-    {2055, 716},  -- VCA decay linearity
-    {2053, 717},  -- VCA env chaos
-    {2176, 718},  -- per voice pan settings - 01
-    {2177, 719},  -- per voice pan settings - 02
-    {2178, 720},  -- per voice pan settings - 03
-    {2179, 721},  -- per voice pan settings - 04
-    {2180, 722},  -- per voice pan settings - 05
-    {2181, 723},  -- per voice pan settings - 06
-    {2182, 724},  -- per voice pan settings - 07
-    {2183, 725},  -- per voice pan settings - 08
-    {2184, 726},  -- per voice pan settings - 09
-    {2185, 727},  -- per voice pan settings - 10
-    {2186, 728},  -- per voice pan settings - 11
-    {2187, 729},  -- per voice pan settings - 12
-    {2188, 730},  -- per voice pan settings - 13
-    {2189, 731},  -- per voice pan settings - 14
-    {2190, 732},  -- per voice pan settings - 15
-    {2191, 733},  -- per voice pan settings - 16
-    {2304, 734},  -- Atrophy profile name character 1
-    {2305, 735},  -- Atrophy profile name character 2
-    {2306, 736},  -- Atrophy profile name character 3
-    {2307, 737},  -- Atrophy profile name character 4
-    {2308, 738},  -- Atrophy profile name character 5
-    {2309, 739},  -- Atrophy profile name character 6
+    {4, 95}, {5, 96}, {6, 97}, {11, 99}, {12, 100}, {262, 102}, {533, 110}, {518, 112}, {535, 113}, {519, 114}, {520, 115}, {536, 116}, {525, 117}, {534, 118}, {526, 119}, {537, 120}, {664, 122}, {650, 123}, {647, 124}, 
+    {653, 125}, {657, 126}, {776, 127}, {777, 128}, {780, 129}, {781, 130}, {784, 131}, {785, 132}, {788, 133}, {789, 134}, {778, 135}, {779, 136}, {782, 137}, {783, 138}, {786, 139}, {787, 140}, {790, 141}, {791, 142}, {913, 152}, {1152, 153}, {2056, 155},
+    {1024, 143}, {1025, 144}, {1026, 145}, {1027, 146}, {1028, 147}, {1029, 148}, {1030, 149}, {2432, 668}, {2433, 669}, {2434, 670}, {2435, 671}, 
+    -- ARP/Seq
+    {138, 686}, {267, 687}, {268, 688}, {521, 689}, {522, 690}, {523, 691}, {524, 692}, {527, 693}, {528, 694}, {529, 695}, {530, 696}, {531, 697}, {532, 698}, {645, 699}, {646, 700}, {648, 701}, {649, 702}, {665, 703},       
+    --Atrophy
+    {666, 704}, {652, 705}, {654, 706}, {655, 707}, {656, 708}, {658, 709}, {659, 710}, {660, 711}, {2049, 712}, {2050, 713}, {2051, 714}, {2054, 715}, {2055, 716}, {2053, 717}, {2176, 718}, {2177, 719}, {2178, 720}, 
+    {2179, 721}, {2180, 722}, {2181, 723}, {2182, 724}, {2183, 725}, {2184, 726}, {2185, 727}, {2186, 728}, {2187, 729}, {2188, 730}, {2189, 731}, {2190, 732}, {2191, 733}, {2304, 734}, {2305, 735}, {2306, 736}, {2307, 737}, {2308, 738}, {2309, 739},
   }
-  -- Batch assign parameters
+  -- Batch map parameters
   for _, m in ipairs(mappings) do
     parameterMap.updateValue (deviceId, PT_NRPN, m[1], data[m[2]])
   end
-  -- Assign bit masked groups
+  -- Map bit masked parameters
   local mappings = {
-    {{37,38,39,40}, 101},                 -- 261 LFO modulation
-    {{50,51,27}, 103},                    -- 263 CH1 LFO destinations
-    {{30,31}, 104},                      -- 264 CH1 quant/invert
-    {{33,35,44}, 105},                   -- 265 CH2 LFO destinations
-    {{49,46}, 106},                      -- 266 CH2 quant/invert
-    {{136,137,138,139,140}, 107},        -- 397 Filter env mods
-    {{141,142,143,144,145}, 108},        -- 398 VCA env mods
-    {{2,9}, 109},                        -- 516 OSC2 modes
-    {{3,154,155}, 111},                  -- 517 Osc1 state
-    {{76,89}, 121},                      -- 644 Filter key track and mode
+    {{37,38,39,40}, 101}, {{50,51,27}, 103}, {{30,31}, 104}, {{33,35,44}, 105}, {{49,46}, 106}, {{136,137,138,139,140}, 107}, {{141,142,143,144,145}, 108}, {{2,9}, 109}, {{3,154,155}, 111}, {{76,89}, 121}, 
   }
   for _, m in ipairs(mappings) do
     pset(m[1],data[m[2]])
   end
-  -- Assign upper patch ARP and sequencer parameters to upper device
-  local mappings = {
-    {1024, 143},  -- ARP enable
-    {1025, 144},  -- ARP mode
-    {1026, 145},  -- ARP hold
-    {1027, 146},  -- ARP time
-    {1028, 147},  -- ARP gate length
-    {1029, 148},  -- ARP sync
-    {1030, 149},  -- ARP octave range
-    {2432, 668},  -- seq # steps
-    {2433, 669},  -- seq time 
-    {2434, 670},  -- seq gate length
-    {2435, 671},  -- seq sync
-  }
-  for _, m in ipairs(mappings) do
-    parameterMap.updateValue(deviceId, PT_NRPN, m[1], data[m[2]])
-  end
-  -- use patch performance parameters unless selkected in split-double mode
+  -- use patch performance parameters unless in split-double mode
   print("Patch Mode = ".. mode)
   if mode == 0 then
     -- 2 byte performance parameters
     local mappings = {
-      {130, 677},  -- Performance pitch bend range (/64)
-      {131, 679},  -- Performance octave pitch transpose (/64)
-      {132, 681},  -- Performance LFO rate (/64)
-      {134, 685},  -- Performance LFO depth (/64) ??
+      {130, 677}, {131, 679}, {132, 681}, {134, 685}, 
     }
     for _, m in ipairs(mappings) do
       parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]]*64)
     end
     -- 1 byte performance parameters
     local mappings = {
-      {1280, 673},  -- Performance keyboard split point
-      {133, 682},  -- Performance LFO shape
+      {1280, 673}, {133, 682},
     }
     for _, m in ipairs(mappings) do
       parameterMap.set(deviceId, PT_NRPN, m[1], data[m[2]])
     end
     -- bit masked performance parameters
     local mappings = {
-      {{115,117,118,119}, 672},            -- 135 Performance LFO mods
-      {{8,10,19,97,103,109}, 674},         -- 129 Performance panel settings
+      {{115,117,118,119}, 672}, {{8,10,19,97,103,109}, 674},
     }
     for _, m in ipairs(mappings) do
       pset(m[1],data[m[2]])
     end
   end
   patchName = get_patch_name(data,79) -- update patchName (starts at byte 79 of data)
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
   if part == 0 then
     patchName = "U "..patchName
   elseif part == 1 then 
@@ -1502,62 +1382,11 @@ function atrophy(dump)
     return
   end
   local data = result.data
-  -- assign byte values to corresponding E1 atrophy parameter values
+  -- Map atrophy profile byte values to nrpn parameters values
   local mappings = {
-    {138, 1}, -- max speed of main mod LFO
-    {267, 2},  -- max speed of performance LFO
-    {268, 3},  -- OB8 Quirks (bitmasked)
-    {521, 4},  -- Osc1 PW left trim
-    {522, 5},  -- Osc1 PW right trim
-    {523, 6},  -- Osc2 PW left trim
-    {524, 7},  -- Osc2 PW right trim
-    {527, 8},  -- PWM offset
-    {528, 9},  -- osc drift
-    {529, 10},  -- osc vol/oct error 
-    {530, 11},  -- osc drift speed
-    {531, 12},  -- osc vol/oct chaos !!WRONG!!!
-    {532, 13},  -- osc initial freq
-    {645, 14},  -- 2-pole resonance trim
-    {646, 15},  -- 4-pole resonance trim
-    {648, 16},  -- 2-pole floor
-    {649, 17},  -- 4-pole floor
-    {665, 18},  -- filter env attack linearity      
-    {666, 19},  -- filter env decay linearity
-    {652, 20},  -- filter env chaos
-    {654, 21},  -- filter drift
-    {655, 22},  -- filter drift speed
-    {656, 23},  -- filter track offset
-    {658, 24},  -- filter v/oct error
-    {659, 25},  -- filter v/oct drift
-    {660, 26},  -- filter initial freq
-    {2049, 27},  -- VCA bias 2p filter
-    {2050, 28},  -- VCA bias unison bias
-    {2051, 29},  -- VCA bias master
-    {2054, 30},  -- VCA attack linearity
-    {2055, 31},  -- VCA decay linearity
-    {2053, 32},  -- VCA env chaos
-    {2176, 33},  -- per voice pan settings - 01
-    {2177, 34},  -- per voice pan settings - 02
-    {2178, 35},  -- per voice pan settings - 03
-    {2179, 36},  -- per voice pan settings - 04
-    {2180, 37},  -- per voice pan settings - 05
-    {2181, 38},  -- per voice pan settings - 06
-    {2182, 39},  -- per voice pan settings - 07
-    {2183, 40},  -- per voice pan settings - 08
-    {2184, 41},  -- per voice pan settings - 09
-    {2185, 42},  -- per voice pan settings - 10
-    {2186, 43},  -- per voice pan settings - 11
-    {2187, 44},  -- per voice pan settings - 12
-    {2188, 45},  -- per voice pan settings - 13
-    {2189, 46},  -- per voice pan settings - 14
-    {2190, 47},  -- per voice pan settings - 15
-    {2191, 48},  -- per voice pan settings - 16
-    {2304, 49},  -- Atrophy profile name character 1
-    {2305, 50},  -- Atrophy profile name character 2
-    {2306, 51},  -- Atrophy profile name character 3
-    {2307, 52},  -- Atrophy profile name character 4
-    {2308, 53},  -- Atrophy profile name character 5
-    {2309, 54},  -- Atrophy profile name character 6
+    {138, 1}, {267, 2}, {268, 3}, {521, 4}, {522, 5}, {523, 6}, {524, 7}, {527, 8}, {528, 9}, {529, 10}, {530, 11}, {531, 12}, {532, 13}, {645, 14}, {646, 15}, {648, 16}, {649, 17}, {665, 18}, {666, 19}, {652, 20},
+    {654, 21}, {655, 22}, {656, 23}, {658, 24}, {659, 25}, {660, 26}, {2049, 27}, {2050, 28}, {2051, 29}, {2054, 30}, {2055, 31}, {2053, 32}, {2176, 33}, {2177, 34}, {2178, 35}, {2179, 36}, {2180, 37}, {2181, 38}, {2182, 39},  
+    {2183, 40}, {2184, 41}, {2185, 42}, {2186, 43}, {2187, 44}, {2188, 45}, {2189, 46}, {2190, 47}, {2191, 48}, {2304, 49}, {2305, 50}, {2306, 51}, {2307, 52}, {2308, 53}, {2309, 54}, 
   }
   -- Batch assign parameters
   for _, p in ipairs(mappings) do
@@ -1578,54 +1407,18 @@ function global(dump)
     return
   end
   local data = result.data
-  -- assign byte values to corresponding E1 global parameter values
+  -- Map global byte values to nrpn parameters
+  -- (1 is RFU)
+  -- (8,9,10,11 are RFU)
+  -- (13,14 are UI lastPatch and UIDisable settings - bitmasked)
+  -- (19 is song position - bitmasked)
+  -- (24-27 are other midi settings - bitmasked)
+  -- (50 is performance panel options - bitmasked)
+  -- {,61} -- RFU (0-32), {1793, 62}, -- Display contrast, {1794, 63}, -- Lever settings, {1795, 64}, -- Fan, {1920, 65}, -- Background calibration settings
   local mappings = {
-    {8,   2}, -- Aftertouch level (1 is RFU)
-    {9,   3}, -- Unison note priority
-    {10,  4}, -- Chord note priority
-    {136, 5}, -- Lower pitch sensitivity
-    {137, 6}, -- Upper pitch sensitivity
-    {904, 7}, -- vintage knob (8,9,10,11 are RFU)
-    {909,  12}, -- Atrophy profile number 
---    (13,14 are UI lastPatch and UIDisable settings - bitmasked)
-    {912,  15}, -- Atrophy mode
-    {1166, 16}, -- global midi transpose
-    {1154, 17}, -- global midi tempo
-    {1155, 18}, -- midi sync source 
---    (19 is song position - bitmasked)
---    (24-27 are other midi settings - bitmasked)
-    {1165, 28}, -- MPE profile
-    {1281, 29}, -- Velocity curve 
-    {1282, 30}, -- Velocity scale
-    {1283, 31}, -- Aftertouch pressure
-    {1284, 32}, -- Aftertouch curve
-    {1408, 33}, -- Sustain pedal assign
-    {1409, 34}, -- Sustain pedal action
-    {1410, 35}, -- Sustain pedal latch
-    {1411, 36}, -- Program pedal action
-    {1412, 37}, -- Program pedal action
-    {1413, 38}, -- Program pedal latch
-    {1414, 39}, -- Hold pedal assign
-    {1415, 40}, -- Hold pedal action
-    {1416, 41}, -- Hold pedal latch
-    {1417, 42}, -- Vib pedal assign
-    {1418, 43}, -- Vib pedal action
-    {1419, 44}, -- Vib pedal min
-    {1420, 45}, -- Vib pedal max
-    {1421, 46}, -- Filter pedal assign
-    {1422, 47}, -- Filter pedal action
-    {1423, 48}, -- Filter pedal min
-    {1424, 49}, -- Filter pedal max 
---    (50 is performance panel options - bitmasked)
-    {1664, 53}, -- turn voices 1-8 on/off
-    {1665, 54}, -- turn voices 9-16 on/off
-    {1666, 55}, -- turn pwm calib 1-8 on/off
-    {1667, 56}, -- turn pwm calib 9-16 on/off
-    {1668, 57}, -- turn vco calib 1-8 on/off
-    {1669, 58}, -- turn vco calib 9-16 on/off
-    {1670, 59}, -- turn vcf calib 1-8 on/off
-    {1671, 60}, -- turn vcf calib 9-16 on/off
---    {,61} -- RFU (0-32), {1793, 62}, -- Display contrast, {1794, 63}, -- Lever settings, {1795, 64}, -- Fan, {1920, 65}, -- Background calibration settings
+    {8,   2}, {9,   3}, {10,  4}, {136, 5}, {137, 6}, {904, 7}, {909,  12}, {912,  15}, {1166, 16}, {1154, 17}, {1155, 18}, {1165, 28}, {1281, 29}, {1282, 30}, {1283, 31}, {1284, 32}, {1408, 33}, {1409, 34}, {1410, 35}, 
+    {1411, 36}, {1412, 37}, {1413, 38}, {1414, 39}, {1415, 40}, {1416, 41}, {1417, 42}, {1418, 43}, {1419, 44}, {1420, 45}, {1421, 46}, {1422, 47}, {1423, 48}, {1424, 49}, 
+    {1664, 53}, {1665, 54}, {1666, 55}, {1667, 56}, {1668, 57}, {1669, 58}, {1670, 59}, {1671, 60}, 
   }
   -- Batch assign nrpn parameters
   for _, p in ipairs(mappings) do
@@ -1634,10 +1427,7 @@ function global(dump)
   end
   -- MIDI channel settings done separately and made read only (PT_VIRTUAL)
   local mappings = {
-    {1157, 20}, -- upper midi rx channel 
-    {1158, 21}, -- lower midi rx channel
-    {1159, 22}, -- upper midi tx channel
-    {1160, 23}, -- lower midi tx channel 
+    {1157, 20}, {1158, 21}, {1159, 22}, {1160, 23},  
   }
   -- Batch assign MIDI channel parameters (read only )
   for _, p in ipairs(mappings) do
@@ -1865,7 +1655,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   if origin ~= INTERNAL then return end
   local msg = valueObjects[1]:getMessage()
   local parameterNumber = msg:getParameterNumber()
-  -- patch data when a patch selection has been made and after a program change executed
+  -- patch data when a patch selection has been made and after a program changes executed
   if parameterNumber == SELECT_MINUS or parameterNumber == SELECT_IT or parameterNumber == SELECT_PLUS or parameterNumber == SELECT_SD then
     if midiValue > 0 then
       local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
@@ -1893,7 +1683,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
       midi.sendSysex(currentPort, message)
     end
   end
-  -- request stored split-double data
+  -- request split-double data
   if parameterNumber == PATCH_MODE then
     if midiValue == 1 then  -- multi 
       local message = {0x00,0x20,0x32,0x00,0x01,MODEL_BYTE,0x7F,0x74,0x07,
