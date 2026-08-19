@@ -886,16 +886,7 @@ function selectSD(valueObject, value)
   midi.sendProgramChange(currentPort , ubxaLowerCh , progNum[2])
 end
 
---- sysEx requests to UB-Xa for data dumps ---
--- Current program data
-function getCurrentProgram(valueObject, value)
-  if value == 0 then return end
-  local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
-  0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x43, 0x75, 0x72, 0x72, 0x65, 
-  0x6E, 0x74, 0x20, 0x50, 0x72, 0x6F, 0x67, 0x72, 0x61, 0x6D, 0x20}
-  midi.sendSysex (currentPort, message)
-end
-
+-------------------------- sysEx requests to UB-Xa for data dumps ---------------------------
 -- Upper patch data
 function getUpperPatch(valueObject, value)
   if value == 0 then return end
@@ -904,7 +895,6 @@ function getUpperPatch(valueObject, value)
   0x20, 0x50, 0x61, 0x74, 0x63, 0x68, 0x20, 0x20, 0x20, 0x20, 0x20}
   midi.sendSysex (currentPort, message)
 end
-
 -- Lower Patch data
 function getLowerPatch(valueObject, value)
   if value == 0 then return end
@@ -913,25 +903,7 @@ function getLowerPatch(valueObject, value)
   0x20, 0x50, 0x61, 0x74, 0x63, 0x68, 0x20, 0x20, 0x20, 0x20, 0x20}
   midi.sendSysex (currentPort, message)
 end
-
--- either upper or lower patch data
-function getPatch(valueObject, value)
-  if value == 0 then return end
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
-  if part == 0 then -- upper patch
-    local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
-    0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x55, 0x70, 0x70, 0x65, 0x72, 
-    0x20, 0x50, 0x61, 0x74, 0x63, 0x68, 0x20, 0x20, 0x20, 0x20, 0x20}
-    midi.sendSysex (currentPort, message)
-  elseif part == 1 then -- lower patch
-    local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
-    0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x4C, 0x6F, 0x77, 0x65, 0x72, 
-    0x20, 0x50, 0x61, 0x74, 0x63, 0x68, 0x20, 0x20, 0x20, 0x20, 0x20}
-    midi.sendSysex (currentPort, message)
-  end
-end
-
--- sysEx request for globals midi data
+-- Globals data
 function getGlobals(valueObject, value)
   if value == 0 then return end
   local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
@@ -940,7 +912,6 @@ function getGlobals(valueObject, value)
   midi.sendSysex (currentPort, message)
 --    sendTableWithDelay(currentPort, message, 1000)
 end
-
 -- Split Double data
 function getSplitDouble(valueObject, value)
   if value == 0 then return end
@@ -949,11 +920,11 @@ function getSplitDouble(valueObject, value)
   0x20, 0x44, 0x6F, 0x75, 0x62, 0x6C, 0x65, 0x20, 0x20, 0x20, 0x20}
   midi.sendSysex (currentPort, message)
 end
-
 -- Stored atrophy profile data or the current patch's atrophy profile data 
 function getAtrophy(valueObject, value)
   if value == 0 then return end
-  local aNum = 49+(math.floor(parameterMap.get(deviceId, PT_VIRTUAL, ATROPHY_NUMBER))) -- atrophy profile ascii # (-> decimal)
+  -- atrophy profile ascii # (-> decimal)
+  local aNum = 49+(math.floor(parameterMap.get(deviceId, PT_VIRTUAL, ATROPHY_NUMBER))) 
   if aNum < 57 then -- use one of the 8 stored atrophy profiles
     local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07, 
       0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x41, 0x74, 0x72, 0x6F, 0x70, 
@@ -966,19 +937,6 @@ function getAtrophy(valueObject, value)
     midi.sendSysex (currentPort, message)
   end
 end
-
--- specific patchX %c%03d data
-function getPatchX(valueObject, value)
-  if value == 0 then return end
-  local bank = parameterMap.get(deviceId, PT_VIRTUAL, 6032) + 65
-  local number  = parameterMap.get(deviceId, PT_VIRTUAL, 6033)
-  local digits = asciiBytesFromNumber(number, 3)
-  local message = {0x00, 0x20, 0x32, 0x00, 0x01, MODEL_BYTE, 0x7F, 0x74, 0x07,
-    0x03, 0x00, 0x42, 0x49, 0x4E, 0x20, 0x50, 0x61, 0x74, 0x63, 0x68,
-    0x58, 0x20, bank, digits[1], digits[2], digits[3], 0x20,0x20,0x20}
-  midi.sendSysex (currentPort, message)
-end
-
 -- Patch names data for all 4 banks
 function getPatchNames(valueObject, value)
   if value == 0 then return end
@@ -1751,28 +1709,6 @@ function patchNames(dump)
     end
   end
   print("patch names parsed. Number of bytes: ".. #data)
-end
-
---------------- parse a current program dump ----------------------------------------------
-function currentProgram(dump)
-  -- parse of the incoming dump
-  local result = parse_sysex(dump)
-  if not result or type(result.data) ~= "table" then
-    print("Could not read data")
-    return
-  end
-  local data = result.data
-  for i = 1479,#data do 
-    print("current program: current performance values: ".. i .. ": " .. data[i])
-  end
-  for i = 672,685 do 
-    print("current program: stored upper performance values: ".. i .. ": " .. data[i])
-  end
-
-  for i = 672+739,685+739 do 
-    print("current program: stored lower performance values: ".. i .. ": " .. data[i])
-  end
-  print("current program settings parsed. Number of bytes: ".. #data)
 end
 
 ------------------------- parameter on change callback section ------------------------- 
