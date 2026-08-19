@@ -8,8 +8,8 @@ UB-Xa v4 was published 8/18/26
 UB-Xa v5 is WIP not published
 
 ## References
-Guide_UB-Xa D_2024_09-06_Rev.1.1.pdf
+[Guide_UB-Xa D_2024_09-06_Rev.1.1.pdf]
 
-UB-Xa D manual.pdf
+[UB-Xa D manual.pdf]
 
 [Electra One Lua API] (https://docs.electra.one/developers/luaext.html)
