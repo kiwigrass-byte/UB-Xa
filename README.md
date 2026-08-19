@@ -61,7 +61,7 @@ Version 4.1
 
 - The oscillator frequency adjustments are a function of the quantification type. The frequency parameter is 14-bit. For octave changes, turning the knob does not provide very precise control since it involves large MIDI value jumps. I have found it better to use the touch screen. 
 
-- In early testing the preset occasionally tripped up while parsing the large sysEx dumps. Sometimes this could be fixed by manually triggering the requests again. However, sometimes I have to reboot the controller. It seems to have been more stable since version 3 parsing code improvements. I am connected to the UB-Xa via a mioXL midi interface. The Electra One is connected via DIN and the UB-Xa is connected via USB.
+- In early testing the preset occasionally tripped up while parsing the large sysEx dumps. Sometimes this could be fixed by manually triggering the requests again. However, sometimes I have to reboot the controller. It seems to have been more stable since version 3 parsing code improvements. I am connected to the UB-Xa via a mioXL midi interface. The Electra One is connected by DIN and the UB-Xa is connected by USB.
 
 ## References
 [Guide_UB-Xa D_2024_09-06_Rev.1.1.pdf]
