@@ -3,3 +3,5 @@ Building an Electra One mk2 preset for the Behringer UB-Xa synth. This repositor
 UB-Xa v3 was published 8/16/26
 UB-Xa v4 was published 8/18/26
 UB-Xa v5 is WIP not published
+Guide_UB-Xa D_2024_09-06_Rev.1.1.pdf
+UB-Xa D manual.pdf
