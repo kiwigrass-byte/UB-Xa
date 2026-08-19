@@ -36,7 +36,6 @@
     {1422, 47}, -- Filter pedal action
     {1423, 48}, -- Filter pedal min
     {1424, 49}, -- Filter pedal max 
---    (50 is performance panel options - bitmasked)
     {1664, 53}, -- turn voices 1-8 on/off
     {1665, 54}, -- turn voices 9-16 on/off
     {1666, 55}, -- turn pwm calib 1-8 on/off
@@ -47,6 +46,10 @@
     {1671, 60}, -- turn vcf calib 9-16 on/off
 --    {,61} -- RFU (0-32), {1793, 62}, -- Display contrast, {1794, 63}, -- Lever settings, {1795, 64}, -- Fan, {1920, 65}, -- Background calibration settings
   }
+--    50 is performance panel options - bitmasked
+  local mappings = { {{300,301,302}, 50}, -- see release notes page 2
+  }
+
   -- MIDI channel settings done separately and made read only (PT_VIRTUAL)
   local mappings = {
     {1157, 20}, -- upper midi rx channel 
